@@ -52,8 +52,8 @@ async function bootstrap() {
   SwaggerModule.setup(`${apiPrefix}/docs`, app, document);
 
   app.enableShutdownHooks();
-  await app.listen(port);
-  logger.log(`EduGram API listening on http://localhost:${port}/${apiPrefix}`);
+  await app.listen(port, '0.0.0.0');
+  logger.log(`EduGram API listening on http://0.0.0.0:${port}/${apiPrefix}`);
   logger.log(`Swagger docs at http://localhost:${port}/${apiPrefix}/docs`);
 }
 
