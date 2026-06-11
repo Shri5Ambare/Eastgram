@@ -1,0 +1,9 @@
+{
+  "cleanUrls": true,
+  "rewrites": [
+    {
+      "source": "/((?!assets/|canvaskit/|main.dart.js|flutter.js|manifest.json|favicon.png|icons/).*)",
+      "destination": "/index.html"
+    }
+  ]
+}
