@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:cached_network_image/cached_network_image.dart';
-import '../../../providers/auth_provider.dart';
 import '../../../providers/feed_provider.dart';
 import '../../../models/models.dart';
 
@@ -59,7 +58,7 @@ class _FeedScreenState extends State<FeedScreen> {
             ),
             const SizedBox(height: 16),
             DropdownButtonFormField<String>(
-              value: visibility,
+              initialValue: visibility,
               decoration: const InputDecoration(labelText: 'Visibility'),
               items: const [
                 DropdownMenuItem(value: 'SCHOOL', child: Text('School (Everyone)')),
@@ -84,13 +83,15 @@ class _FeedScreenState extends State<FeedScreen> {
             ),
             onPressed: () async {
               if (textController.text.trim().isNotEmpty) {
-                final success = await Provider.of<FeedProvider>(context, listen: false).createPost(
+                final feedProvider = Provider.of<FeedProvider>(context, listen: false);
+                final navigator = Navigator.of(ctx);
+                final success = await feedProvider.createPost(
                   caption: textController.text.trim(),
                   type: 'POST',
                   visibility: visibility,
                 );
                 if (success && mounted) {
-                  Navigator.pop(ctx);
+                  navigator.pop();
                 }
               }
             },
@@ -104,7 +105,6 @@ class _FeedScreenState extends State<FeedScreen> {
   @override
   Widget build(BuildContext context) {
     final feed = Provider.of<FeedProvider>(context);
-    final user = Provider.of<AuthProvider>(context).currentUser;
 
     return Scaffold(
       appBar: AppBar(

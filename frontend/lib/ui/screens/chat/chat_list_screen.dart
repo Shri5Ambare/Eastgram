@@ -3,7 +3,6 @@ import 'package:provider/provider.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import '../../../providers/auth_provider.dart';
 import '../../../providers/chat_provider.dart';
-import '../../../models/models.dart';
 import 'chat_room_screen.dart';
 
 class ChatListScreen extends StatefulWidget {
@@ -69,14 +68,14 @@ class _ChatListScreenState extends State<ChatListScreen> {
               if (recipientId.isNotEmpty) {
                 try {
                   final provider = Provider.of<ChatProvider>(context, listen: false);
+                  final navigator = Navigator.of(context);
                   final conv = await provider.startNewConversation(
                     recipientId,
                     messageController.text.trim().isNotEmpty ? messageController.text.trim() : 'Hello!',
                   );
                   if (mounted) {
-                    Navigator.pop(ctx);
-                    Navigator.push(
-                      context,
+                    navigator.pop();
+                    navigator.push(
                       MaterialPageRoute(
                         builder: (context) => ChatRoomScreen(conversation: conv),
                       ),

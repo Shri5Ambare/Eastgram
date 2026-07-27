@@ -120,7 +120,7 @@ class _PollCard extends StatelessWidget {
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                   decoration: BoxDecoration(
-                    color: const Color(0xFF764BA2).withOpacity(0.1),
+                    color: const Color(0xFF764BA2).withValues(alpha: 0.1),
                     borderRadius: BorderRadius.circular(20),
                   ),
                   child: Text(
@@ -177,7 +177,7 @@ class _PollCard extends StatelessWidget {
                               height: 48,
                               decoration: BoxDecoration(
                                 color: isMyVote 
-                                    ? const Color(0xFF764BA2).withOpacity(0.2)
+                                    ? const Color(0xFF764BA2).withValues(alpha: 0.2)
                                     : Colors.grey[200],
                                 borderRadius: BorderRadius.circular(10),
                               ),
@@ -218,7 +218,7 @@ class _PollCard extends StatelessWidget {
                   final isMyVote = poll.myVotes.any((v) => v['candidateId'] == cand.id);
 
                   return Card(
-                    color: isMyVote ? const Color(0xFF764BA2).withOpacity(0.05) : Colors.white,
+                    color: isMyVote ? const Color(0xFF764BA2).withValues(alpha: 0.05) : Colors.white,
                     shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(12),
                       side: isMyVote ? const BorderSide(color: Color(0xFF764BA2), width: 1.5) : BorderSide.none,

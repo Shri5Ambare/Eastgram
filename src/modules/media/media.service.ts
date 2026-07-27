@@ -1,7 +1,6 @@
 import {
   Injectable,
   InternalServerErrorException,
-  Logger,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
@@ -18,7 +17,6 @@ const nanoid = customAlphabet('0123456789abcdefghijklmnopqrstuvwxyz', 16);
  */
 @Injectable()
 export class MediaService {
-  private readonly logger = new Logger(MediaService.name);
   private readonly s3: S3Client;
   private readonly bucket: string;
   private readonly publicUrl: string;

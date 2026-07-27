@@ -43,7 +43,6 @@ class _LoginScreenState extends State<LoginScreen> {
   @override
   Widget build(BuildContext context) {
     final auth = Provider.of<AuthProvider>(context);
-    final theme = Theme.of(context);
 
     return Scaffold(
       body: Container(
