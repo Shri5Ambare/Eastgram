@@ -1,0 +1,16 @@
+version: "1"
+services:
+  - name: edugram-backend
+    type: web
+    build:
+      dockerfilePath: ./Dockerfile
+    port: 3000
+    healthCheck:
+      path: /api/v1/health
+      interval: 30
+      timeout: 10
+    startCommand: npx prisma migrate deploy && node dist/main
+    env:
+      NODE_ENV: production
+      PORT: "3000"
+      REDIS_ADAPTER_ENABLED: "true"

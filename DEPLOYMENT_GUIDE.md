@@ -1,53 +1,56 @@
-# EduGram 100% Free Cloud Deployment Guide
+# EduGram PandaStack + Vercel Deployment Guide
 
-This guide details how to deploy **EduGram** for 100% free using:
-- 🖥️ **Render** — Backend NestJS Web Service (Free Tier)
-- 🌐 **Vercel** — Frontend Flutter Web App (Free Tier)
-- 🗄️ **Supabase** — PostgreSQL Database (Free 500MB Tier)
-- ⚡ **Upstash** — Redis Cache (Free Serverless Redis Tier)
+This guide details how to deploy **EduGram** for free using **PandaStack** (Backend API + Database + Redis) and **Vercel** (Flutter Web Frontend).
 
 ---
 
-## 1. Step-by-Step Setup
+## 📋 Architecture
 
-### Step 1: Database (Supabase)
-1. Go to [supabase.com](https://supabase.com) -> **New Project**.
-2. Go to **Project Settings** -> **Database** -> **Connection String (URI)**.
-3. Copy string: `postgresql://postgres:[PASSWORD]@...pooler.supabase.com:6543/postgres?pgbouncer=true`
+- 🖥️ **Backend API**: PandaStack Container Web Service (`Dockerfile`)
+- 🗄️ **Database**: PandaStack Managed PostgreSQL Database (or Supabase)
+- ⚡ **Redis Cache**: PandaStack Managed Redis (or Upstash)
+- 🌐 **Frontend**: Vercel (Flutter Web App)
 
-### Step 2: Redis Cache (Upstash)
-1. Go to [console.upstash.com](https://console.upstash.com) -> **Create Database** (Redis).
-2. Note: `REDIS_HOST`, `REDIS_PORT` (6379), and `REDIS_PASSWORD`.
+---
 
-### Step 3: Backend API (Render)
-1. Log in to [dashboard.render.com](https://dashboard.render.com) -> **New +** -> **Web Service**.
-2. Connect your GitHub repository `Shri5Ambare/Eastgram`.
-3. Render automatically detects `render.yaml` or set:
-   - **Environment**: Docker
-   - **Plan**: Free
-   - **Health Check Path**: `/api/v1/health`
-4. In **Environment Variables**, set:
-   - `DATABASE_URL`: `[Your Supabase connection string]`
-   - `REDIS_HOST`: `[Your Upstash host]`
-   - `REDIS_PORT`: `6379`
-   - `REDIS_PASSWORD`: `[Your Upstash password]`
-   - `JWT_ACCESS_SECRET`: `[64-char hex secret]`
-   - `JWT_REFRESH_SECRET`: `[64-char hex secret]`
-5. Click **Create Web Service**. Render builds the Docker image and gives you a free HTTPS URL (e.g. `https://edugram-backend.onrender.com`).
+## 🚀 Step 1: Deploy Backend & Database on PandaStack
 
-### Step 4: Frontend Web App (Vercel)
+1. Go to [pandastack.com](https://pandastack.com) and log in with your GitHub account.
+2. Click **Create Project** -> Name it `edugram`.
+3. **Add Database**:
+   - Click **+ Add Database** -> Choose **PostgreSQL**.
+   - Copy the database connection URL (`DATABASE_URL`).
+4. **Add Redis**:
+   - Click **+ Add Service/Database** -> Choose **Redis**.
+   - Copy `REDIS_HOST`, `REDIS_PORT` (`6379`), and `REDIS_PASSWORD`.
+5. **Deploy Backend Web Service**:
+   - Click **+ New Service** -> Select **GitHub Repository**.
+   - Choose `Shri5Ambare/Eastgram`.
+   - PandaStack will automatically pick up `pandastack.yaml` and `Dockerfile`.
+   - Set the following Environment Variables in the service settings:
+
+| Key | Value | Description |
+| :--- | :--- | :--- |
+| `NODE_ENV` | `production` | Production environment |
+| `PORT` | `3000` | HTTP Port |
+| `DATABASE_URL` | `postgresql://...` | Connection string from PandaStack Postgres |
+| `REDIS_HOST` | `[REDIS_HOST]` | Host from PandaStack Redis |
+| `REDIS_PORT` | `6379` | Redis Port |
+| `REDIS_PASSWORD` | `[REDIS_PASSWORD]` | Redis Password |
+| `JWT_ACCESS_SECRET` | `[RANDOM-SECURE-STRING]` | 64-char hex secret |
+| `JWT_REFRESH_SECRET` | `[RANDOM-SECURE-STRING]` | 64-char hex secret |
+| `REDIS_ADAPTER_ENABLED` | `true` | Enable Socket.io multi-node adapter |
+
+6. Save and deploy! PandaStack will build the container, run database migrations (`npx prisma migrate deploy`), and assign a public URL (e.g. `https://edugram-api.pandastack.app`).
+
+---
+
+## 🌐 Step 2: Deploy Frontend on Vercel
+
 1. Log in to [vercel.com](https://vercel.com) -> **Add New** -> **Project**.
 2. Import `Shri5Ambare/Eastgram` repository.
-3. Set root directory to `frontend`.
-4. Vercel automatically uses `frontend/vercel.json` to build Flutter Web and host it for free!
-5. In Vercel Project Settings -> **Environment Variables**:
-   - `API_BASE_URL`: `https://edugram-backend.onrender.com/api/v1`
-   - `SOCKET_URL`: `https://edugram-backend.onrender.com`
-
----
-
-## ✅ Deployment Summary
-- **Backend API**: `https://edugram-backend.onrender.com`
-- **Database**: Supabase PostgreSQL
-- **Cache**: Upstash Redis
-- **Frontend Web**: `https://edugram.vercel.app`
+3. Set **Root Directory** to `frontend`.
+4. Add Environment Variables:
+   - `API_BASE_URL`: `https://edugram-api.pandastack.app/api/v1`
+   - `SOCKET_URL`: `https://edugram-api.pandastack.app`
+5. Click **Deploy**. Vercel uses `frontend/vercel.json` to build and serve the release Flutter Web app.
