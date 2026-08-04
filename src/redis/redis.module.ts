@@ -7,15 +7,22 @@ import { REDIS_CLIENT, REDIS_SUBSCRIBER } from './redis.constants';
 const logger = new Logger('Redis');
 
 function buildClient(config: ConfigService): Redis {
-  const client = new Redis({
-    host: config.get<string>('redis.host'),
-    port: config.get<number>('redis.port'),
-    password: config.get<string>('redis.password'),
-    db: config.get<number>('redis.db'),
+  const url = config.get<string>('redis.url');
+  const options = {
     maxRetriesPerRequest: null,
     lazyConnect: false,
-    retryStrategy: (times) => Math.min(times * 200, 5000),
-  });
+    retryStrategy: (times: number) => Math.min(times * 200, 5000),
+  };
+
+  const client = url
+    ? new Redis(url, options)
+    : new Redis({
+        host: config.get<string>('redis.host'),
+        port: config.get<number>('redis.port'),
+        password: config.get<string>('redis.password'),
+        db: config.get<number>('redis.db'),
+        ...options,
+      });
 
   // Attaching an error handler prevents unhandled-error crashes when Redis is
   // briefly unreachable; ioredis will keep retrying per the strategy above.

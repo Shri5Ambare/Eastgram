@@ -16,9 +16,10 @@ export default () => ({
       .filter(Boolean),
   },
   redis: {
-    host: process.env.REDIS_HOST ?? 'localhost',
-    port: parseInt(process.env.REDIS_PORT ?? '6379', 10),
-    password: process.env.REDIS_PASSWORD || undefined,
+    url: process.env.REDIS_URL || undefined,
+    host: process.env.REDIS_HOST ?? process.env.REDISHOST ?? 'localhost',
+    port: parseInt(process.env.REDIS_PORT ?? process.env.REDISPORT ?? '6379', 10),
+    password: (process.env.REDIS_PASSWORD ?? process.env.REDISPASSWORD) || undefined,
     db: parseInt(process.env.REDIS_DB ?? '0', 10),
     adapterEnabled: (process.env.REDIS_ADAPTER_ENABLED ?? 'true') === 'true',
   },
