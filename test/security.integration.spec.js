@@ -7,6 +7,9 @@ const { PostAccessService } = require('../src/modules/posts/post-access.service'
 const { CommentsService } = require('../src/modules/posts/comments.service');
 const { ReactionsService } = require('../src/modules/posts/reactions.service');
 const { UsersService } = require('../src/modules/users/users.service');
+const { MessagingService } = require('../src/modules/messaging/messaging.service');
+const { MediaService } = require('../src/modules/media/media.service');
+const { RealtimeService } = require('../src/realtime/realtime.service');
 const { GroupsService } = require('../src/modules/groups/groups.service');
 const { EventsService } = require('../src/modules/events/events.service');
 const { PollsService } = require('../src/modules/polls/polls.service');
@@ -16,9 +19,9 @@ const { AuthService } = require('../src/modules/auth/auth.service');
 
 const integration = process.env.TEST_DATABASE_URL ? describe : describe.skip;
 integration('security regression with PostgreSQL', () => {
-  let db, schools, actors, classes, records, posts, access, comments, reactions, users, auth, groups, events, polls, follows, achievements, catalog;
-  const notify = { notify: jest.fn().mockResolvedValue(undefined) };
-  const realtime = { disconnectUser: jest.fn() };
+  let db, schools, actors, classes, records, posts, access, comments, reactions, users, auth, groups, events, polls, follows, achievements, catalog, messaging, media;
+  const notify = { notify: jest.fn().mockResolvedValue(undefined), notifyMany: jest.fn().mockResolvedValue(undefined) };
+  const realtime = { disconnectUser: jest.fn(), joinConversation: jest.fn(), emitToConversation: jest.fn().mockResolvedValue(undefined) };
   const pagination = { page: 1, limit: 100, skip: 0 };
   const jwt = new JwtService();
   const config = { get: key => ({
@@ -55,11 +58,17 @@ integration('security regression with PostgreSQL', () => {
     records.STORY = await db.post.create({ data: { authorId: actors[0].id, type: 'STORY', expiresAt: new Date(Date.now() - 1000) } });
     await db.follow.create({ data: { followerId: actors[2].id, followingId: actors[0].id } });
     access = new PostAccessService(db);
-    posts = new PostsService(db, access);
+    posts = new PostsService(db, access, { signedReadUrl: jest.fn(async key => 'https://signed.example.test/' + key) });
     comments = new CommentsService(db, notify, access);
     reactions = new ReactionsService(db, notify, access);
     users = new UsersService(db, realtime);
     auth = new AuthService(db, jwt, config);
+    messaging = new MessagingService(db, realtime, notify);
+    media = new MediaService(db, { get: key => ({
+      'r2.endpoint': 'https://account.r2.cloudflarestorage.com', 'r2.bucket': 'test-private-bucket',
+      'r2.accessKeyId': 'test-key', 'r2.secretAccessKey': 'test-secret', 'r2.presignTtl': 900,
+      'r2.publicUrl': 'https://old-public.example.test',
+    })[key] });
     groups = new GroupsService(db, notify);
     events = new EventsService(db);
     polls = new PollsService(db, notify);
@@ -68,6 +77,7 @@ integration('security regression with PostgreSQL', () => {
   }, 30000);
 
   afterAll(async () => {
+    if (records?.conversations?.length) await db.conversation.deleteMany({ where: { id: { in: records.conversations } } });
     if (catalog) await db.achievement.delete({ where: { id: catalog.id } });
     if (schools) await db.school.deleteMany({ where: { id: { in: schools.map(s => s.id) } } });
     if (db) await db.$disconnect();
@@ -227,6 +237,83 @@ integration('security regression with PostgreSQL', () => {
     await expect(achievements.award(actors[4], { achievementId: catalog.id, recipientId: actors[1].id })).resolves.toMatchObject({ recipientId: actors[1].id });
     await expect(achievements.userAchievements(actors[3], actors[1].username, pagination)).rejects.toThrow('User not found');
     expect((await achievements.userAchievements(actors[0], actors[1].username, pagination)).items).toHaveLength(1);
+  });
+
+  test('messaging enforces tenant/group access, attachment ownership and reply thread', async () => {
+    records.conversations = [];
+    const create = async (memberIds, groupId) => {
+      const conversation = await db.conversation.create({ data: { groupId, members: { create: memberIds.map(userId => ({ userId })) } } });
+      records.conversations.push(conversation.id);
+      return conversation;
+    };
+    const direct = await create([actors[0].id, actors[1].id]);
+    const other = await create([actors[0].id, actors[4].id]);
+    const foreign = await create([actors[0].id, actors[3].id]);
+    const club = await create([actors[0].id, actors[1].id], records.CLUB.groupId);
+    records.DIRECT = direct;
+    records.CLUB_CHAT = club;
+    await expect(messaging.getConversation(actors[0], foreign.id)).rejects.toThrow('not part');
+    await expect(messaging.listMessages(actors[3], direct.id, pagination)).rejects.toThrow('not part');
+    await expect(messaging.markRead(actors[1], club.id)).rejects.toThrow('not part');
+    expect((await messaging.listConversations(actors[0], pagination)).items.map(c => c.id)).not.toContain(foreign.id);
+    const attachment = await db.media.create({ data: { ownerId: actors[1].id, type: 'IMAGE', key: 'fixture/' + randomUUID(), url: 'https://legacy.example.test' } });
+    await expect(messaging.send(actors[0], direct.id, { mediaId: attachment.id })).rejects.toThrow('Attachment not found');
+    const parent = await db.message.create({ data: { senderId: actors[0].id, conversationId: other.id, body: 'other thread' } });
+    await expect(messaging.send(actors[0], direct.id, { body: 'wrong reply', replyToId: parent.id })).rejects.toThrow('Reply message not found');
+    await expect(messaging.send(actors[1], direct.id, { mediaId: attachment.id, body: 'mine' })).resolves.toMatchObject({ mediaId: attachment.id });
+    await db.user.update({ where: { id: actors[4].id }, data: { status: 'SUSPENDED' } });
+    await expect(messaging.startDirect(actors[0], { recipientId: actors[4].id })).rejects.toThrow('Recipient not found');
+    await db.user.update({ where: { id: actors[4].id }, data: { status: 'ACTIVE' } });
+  });
+
+  test('realtime delivery ignores stale rooms and rechecks active club members', async () => {
+    const service = new RealtimeService(db);
+    const emit = jest.fn();
+    const server = { to: jest.fn(() => ({ emit })) };
+    service.bind(server);
+    await service.emitToConversation(records.CLUB_CHAT.id, 'message:new', { body: 'club' });
+    expect(server.to).toHaveBeenLastCalledWith([`user:${actors[0].id}`]);
+    await db.groupMember.update({ where: { groupId_userId: { groupId: records.CLUB.groupId, userId: actors[1].id } }, data: { isApproved: true } });
+    await service.emitToConversation(records.CLUB_CHAT.id, 'message:new', { body: 'approved' });
+    expect(server.to.mock.calls.at(-1)[0]).toEqual(expect.arrayContaining([`user:${actors[0].id}`, `user:${actors[1].id}`]));
+    await db.user.update({ where: { id: actors[1].id }, data: { status: 'SUSPENDED' } });
+    await service.emitToConversation(records.CLUB_CHAT.id, 'message:new', { body: 'revoked' });
+    expect(server.to).toHaveBeenLastCalledWith([`user:${actors[0].id}`]);
+    await db.user.update({ where: { id: actors[1].id }, data: { status: 'ACTIVE' } });
+    await db.groupMember.update({ where: { groupId_userId: { groupId: records.CLUB.groupId, userId: actors[1].id } }, data: { isApproved: false } });
+    await db.group.update({ where: { id: records.CLUB.groupId }, data: { isArchived: true } });
+    const before = emit.mock.calls.length;
+    await service.emitToConversation(records.CLUB_CHAT.id, 'message:new', {});
+    expect(emit.mock.calls.length).toBe(before);
+    await db.group.update({ where: { id: records.CLUB.groupId }, data: { isArchived: false } });
+  });
+
+  test('upload confirmation verifies object ownership, actual metadata and idempotency', async () => {
+    const key = `image/${actors[0].id}/1234567890-abcdefghijklmnop.png`;
+    media.s3.send = jest.fn().mockResolvedValue({ Metadata: { ownerid: actors[0].id, mediatype: 'IMAGE' }, ContentType: 'image/png', ContentLength: 12 });
+    await expect(media.confirmUpload(actors[1].id, { key, type: 'IMAGE' })).rejects.toThrow('does not belong');
+    expect(media.s3.send).not.toHaveBeenCalled();
+    await expect(media.confirmUpload(actors[0].id, { key, type: 'IMAGE', sizeBytes: 13 })).rejects.toThrow('size does not match');
+    media.s3.send.mockResolvedValueOnce({ Metadata: { ownerid: actors[1].id, mediatype: 'IMAGE' }, ContentType: 'image/png', ContentLength: 12 });
+    await expect(media.confirmUpload(actors[0].id, { key, type: 'IMAGE' })).rejects.toThrow('ownership');
+    const confirmed = await media.confirmUpload(actors[0].id, { key, type: 'IMAGE', mimeType: 'image/png', sizeBytes: 12 });
+    expect(confirmed.url).toContain('X-Amz-Signature=');
+    expect(confirmed.thumbnailUrl).toBeNull();
+    expect((await media.confirmUpload(actors[0].id, { key, type: 'IMAGE' })).id).toBe(confirmed.id);
+    records.MEDIA = confirmed;
+    await expect(media.createPresignedUpload(actors[0].id, { type: 'IMAGE', mimeType: 'image/svg+xml', fileName: 'unsafe.svg' })).rejects.toThrow('Unsupported');
+  });
+
+  test('media URLs require owning post/message audience and cannot leak via moderation', async () => {
+    const privatePost = await posts.create(actors[0], { visibility: 'PRIVATE', mediaIds: [records.MEDIA.id] });
+    expect(privatePost.media[0].media.url).toContain('signed.example.test');
+    await expect(media.access(actors[1], records.MEDIA.id)).rejects.toThrow('Media not found');
+    await expect(media.access(actors[3], records.MEDIA.id)).rejects.toThrow('Media not found');
+    expect((await posts.update(actors[4], privatePost.id, { caption: 'moderated' })).media).toEqual([]);
+    await db.message.create({ data: { conversationId: records.DIRECT.id, senderId: actors[0].id, mediaId: records.MEDIA.id } });
+    await expect(media.access(actors[1], records.MEDIA.id)).resolves.toMatchObject({ expiresIn: 300, url: expect.stringContaining('X-Amz-Signature=') });
+    await db.conversationMember.delete({ where: { conversationId_userId: { conversationId: records.DIRECT.id, userId: actors[1].id } } });
+    await expect(media.access(actors[1], records.MEDIA.id)).rejects.toThrow('Media not found');
   });
 
   test('refresh rotation has one winner under concurrent real database transactions', async () => {

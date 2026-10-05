@@ -7,16 +7,17 @@ export async function authenticateSocket(
   socket: Socket,
   jwt: JwtService,
   secret: string,
-): Promise<{ userId: string } | null> {
+): Promise<{ userId: string; expiresAt: number } | null> {
   const raw =
     (socket.handshake.auth?.token as string) ||
     socket.handshake.headers?.authorization?.replace(/^Bearer\s+/i, '');
 
-  if (!raw) return null;
+  if (!raw || typeof raw !== 'string') return null;
 
   try {
-    const payload = await jwt.verifyAsync<{ sub: string }>(raw, { secret });
-    return { userId: payload.sub };
+    const payload = await jwt.verifyAsync<{ sub: string; exp: number }>(raw, { secret });
+    if (typeof payload.sub !== 'string' || !payload.sub || !Number.isFinite(payload.exp) || payload.exp * 1000 <= Date.now()) return null;
+    return { userId: payload.sub, expiresAt: payload.exp * 1000 };
   } catch {
     return null;
   }

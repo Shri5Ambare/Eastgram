@@ -13,6 +13,7 @@ import { paginate, PaginationDto } from '@common/dto/pagination.dto';
 import { PrismaService } from '@/prisma/prisma.service';
 import { RealtimeService } from '@/realtime/realtime.service';
 import { NotificationsService } from '../notifications/notifications.service';
+import { readableConversationWhere } from './conversation-access.policy';
 import { SendMessageDto, StartConversationDto } from './dto/messaging.dto';
 import {
   canInitiateConversation,
@@ -52,9 +53,10 @@ export class MessagingService {
         classId: true,
         messagePermission: true,
         schoolId: true,
+        status: true,
       },
     });
-    if (!recipient) throw new NotFoundException('Recipient not found');
+    if (!recipient || recipient.status !== 'ACTIVE') throw new NotFoundException('Recipient not found');
     if (recipient.schoolId !== user.schoolId) {
       throw new ForbiddenException('Recipient is in a different school');
     }
@@ -64,7 +66,7 @@ export class MessagingService {
       if (dto.message) {
         await this.send(user, existing.id, { body: dto.message });
       }
-      return this.getConversation(user.id, existing.id);
+      return this.getConversation(user, existing.id);
     }
 
     // No existing thread — enforce initiation permission.
@@ -92,25 +94,24 @@ export class MessagingService {
     if (dto.message) {
       await this.send(user, conversation.id, { body: dto.message });
     }
-    return this.getConversation(user.id, conversation.id);
+    return this.getConversation(user, conversation.id);
   }
 
   async send(user: AuthUser, conversationId: string, dto: SendMessageDto) {
-    const membership = await this.prisma.conversationMember.findUnique({
-      where: {
-        conversationId_userId: { conversationId, userId: user.id },
-      },
-      include: { conversation: { include: { members: true } } },
-    });
-    if (!membership) {
-      throw new ForbiddenException('You are not part of this conversation');
+    const conversation = await this.requireMember(conversationId, user);
+    if (dto.mediaId && !await this.prisma.media.findFirst({ where: { id: dto.mediaId, ownerId: user.id }, select: { id: true } })) {
+      throw new NotFoundException('Attachment not found');
+    }
+    if (dto.replyToId && !await this.prisma.message.findFirst({ where: { id: dto.replyToId, conversationId, isDeleted: false }, select: { id: true } })) {
+      throw new NotFoundException('Reply message not found');
     }
 
     const verdict = canSendInExisting(this.toActor(user));
     if (!verdict.allowed) throw new ForbiddenException(verdict.reason);
 
-    const recipients = membership.conversation.members.filter(
-      (m) => m.userId !== user.id,
+    const recipients = conversation.members.filter(m =>
+      m.userId !== user.id && m.user.status === 'ACTIVE' &&
+      (!conversation.group || conversation.group.members.some(g => g.userId === m.userId)),
     );
 
     const message = await this.prisma.message.create({
@@ -133,7 +134,7 @@ export class MessagingService {
     });
 
     // Realtime fan-out to the conversation room.
-    this.realtime.emitToConversation(conversationId, 'message:new', message);
+    await this.realtime.emitToConversation(conversationId, 'message:new', message);
 
     // Push + persisted notification for offline recipients.
     await this.notifications.notifyMany(
@@ -150,8 +151,8 @@ export class MessagingService {
     return message;
   }
 
-  async listConversations(userId: string, dto: PaginationDto) {
-    const where = { members: { some: { userId } } };
+  async listConversations(user: AuthUser, dto: PaginationDto) {
+    const where = readableConversationWhere(user);
     const [items, total] = await this.prisma.$transaction([
       this.prisma.conversation.findMany({
         where,
@@ -172,8 +173,8 @@ export class MessagingService {
     return paginate(items, total, dto.page, dto.limit);
   }
 
-  async getConversation(userId: string, conversationId: string) {
-    await this.requireMember(conversationId, userId);
+  async getConversation(user: AuthUser, conversationId: string) {
+    await this.requireMember(conversationId, user);
     return this.prisma.conversation.findUnique({
       where: { id: conversationId },
       include: { members: { include: { user: MEMBER_CARD } } },
@@ -181,12 +182,12 @@ export class MessagingService {
   }
 
   async listMessages(
-    userId: string,
+    user: AuthUser,
     conversationId: string,
     dto: PaginationDto,
   ) {
-    await this.requireMember(conversationId, userId);
-    const where = { conversationId, isDeleted: false };
+    await this.requireMember(conversationId, user);
+    const where = { conversationId, isDeleted: false, sender: { schoolId: user.schoolId } };
     const [items, total] = await this.prisma.$transaction([
       this.prisma.message.findMany({
         where,
@@ -200,8 +201,9 @@ export class MessagingService {
     return paginate(items, total, dto.page, dto.limit);
   }
 
-  async markRead(userId: string, conversationId: string) {
-    await this.requireMember(conversationId, userId);
+  async markRead(user: AuthUser, conversationId: string) {
+    const userId = user.id;
+    await this.requireMember(conversationId, user);
     const now = new Date();
     await this.prisma.$transaction([
       this.prisma.conversationMember.update({
@@ -213,7 +215,7 @@ export class MessagingService {
         data: { readAt: now },
       }),
     ]);
-    this.realtime.emitToConversation(conversationId, 'message:read', {
+    await this.realtime.emitToConversation(conversationId, 'message:read', {
       conversationId,
       userId,
       readAt: now,
@@ -245,13 +247,15 @@ export class MessagingService {
     });
   }
 
-  private async requireMember(conversationId: string, userId: string) {
-    const member = await this.prisma.conversationMember.findUnique({
-      where: { conversationId_userId: { conversationId, userId } },
-      select: { id: true },
+  private async requireMember(conversationId: string, user: AuthUser) {
+    const conversation = await this.prisma.conversation.findFirst({
+      where: { AND: [{ id: conversationId }, readableConversationWhere(user)] },
+      include: {
+        members: { include: { user: { select: { status: true } } } },
+        group: { include: { members: { where: { isApproved: true }, select: { userId: true } } } },
+      },
     });
-    if (!member) {
-      throw new ForbiddenException('You are not part of this conversation');
-    }
+    if (!conversation) throw new ForbiddenException('You are not part of this conversation');
+    return conversation;
   }
 }

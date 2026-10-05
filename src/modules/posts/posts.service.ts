@@ -9,6 +9,7 @@ import { paginate, PaginationDto } from '@common/dto/pagination.dto';
 import { PrismaService } from '@/prisma/prisma.service';
 import { PostAccessService } from './post-access.service';
 import { readablePostWhere } from './post-access.policy';
+import { MediaService } from '../media/media.service';
 import { CreatePostDto, UpdatePostDto } from './dto/post.dto';
 
 const STORY_TTL_MS = 24 * 60 * 60 * 1000;
@@ -33,7 +34,7 @@ const POST_INCLUDE = {
 
 @Injectable()
 export class PostsService {
-  constructor(private readonly prisma: PrismaService, private readonly access: PostAccessService) {}
+  constructor(private readonly prisma: PrismaService, private readonly access: PostAccessService, private readonly mediaService: MediaService) {}
 
   async create(user: AuthUser, dto: CreatePostDto) {
     const type = dto.type ?? PostType.POST;
@@ -52,7 +53,7 @@ export class PostsService {
     const expiresAt =
       type === PostType.STORY ? new Date(Date.now() + STORY_TTL_MS) : null;
 
-    return this.prisma.post.create({
+    const post = await this.prisma.post.create({
       data: {
         authorId: user.id,
         type,
@@ -71,6 +72,7 @@ export class PostsService {
       },
       include: POST_INCLUDE,
     });
+    return this.signMedia(post);
   }
 
   /** Personalised feed: posts from people the user follows + their own +
@@ -110,7 +112,7 @@ export class PostsService {
     });
     const authorIds = [...following.map((f) => f.followingId), user.id];
 
-    return this.prisma.post.findMany({
+    const posts = await this.prisma.post.findMany({
       where: {
         type: PostType.STORY,
         authorId: { in: authorIds },
@@ -119,6 +121,7 @@ export class PostsService {
       include: POST_INCLUDE,
       orderBy: { createdAt: 'desc' },
     });
+    return Promise.all(posts.map(post => this.signMedia(post)));
   }
 
   async userPosts(user: AuthUser, username: string, type: PostType, dto: PaginationDto) {
@@ -140,7 +143,7 @@ export class PostsService {
       include: POST_INCLUDE,
     });
     if (!post || post.isArchived) throw new NotFoundException('Post not found');
-    return post;
+    return this.signMedia(post);
   }
 
   async update(user: AuthUser, id: string, dto: UpdatePostDto) {
@@ -149,11 +152,14 @@ export class PostsService {
       const author = await this.prisma.user.findUnique({ where: { id: post.authorId }, select: { classId: true } });
       await this.access.validateAudience({ ...user, id: post.authorId, classId: author?.classId ?? null }, dto.visibility, post.groupId);
     }
-    return this.prisma.post.update({
+    const updated = await this.prisma.post.update({
       where: { id },
       data: dto,
       include: POST_INCLUDE,
     });
+    // Moderation permission does not grant the moderator private media access.
+    const readable = await this.prisma.post.count({ where: { AND: [{ id }, readablePostWhere(user)] } });
+    return readable ? this.signMedia(updated) : { ...updated, media: [] };
   }
 
   async remove(user: AuthUser, id: string) {
@@ -184,7 +190,16 @@ export class PostsService {
       }),
       this.prisma.post.count({ where }),
     ]);
-    return paginate(items, total, dto.page, dto.limit);
+    return paginate(await Promise.all(items.map(post => this.signMedia(post))), total, dto.page, dto.limit);
+  }
+
+  private async signMedia(post: Prisma.PostGetPayload<{ include: typeof POST_INCLUDE }>) {
+    return {
+      ...post,
+      media: await Promise.all(post.media.map(async item => ({
+        ...item, media: { ...item.media, url: await this.mediaService.signedReadUrl(item.media.key), thumbnailUrl: null },
+      }))),
+    };
   }
 
   private async ensureOwnerOrStaff(user: AuthUser, postId: string) {
