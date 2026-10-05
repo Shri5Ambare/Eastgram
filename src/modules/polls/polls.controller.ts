@@ -53,8 +53,8 @@ export class PollsController {
 
   @Get(':id/results')
   @ApiOperation({ summary: 'Get poll results / tally' })
-  results(@Param('id') id: string) {
-    return this.polls.results(id);
+  results(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+    return this.polls.results(user, id);
   }
 
   @Post(':id/open')

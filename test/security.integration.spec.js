@@ -7,11 +7,16 @@ const { PostAccessService } = require('../src/modules/posts/post-access.service'
 const { CommentsService } = require('../src/modules/posts/comments.service');
 const { ReactionsService } = require('../src/modules/posts/reactions.service');
 const { UsersService } = require('../src/modules/users/users.service');
+const { GroupsService } = require('../src/modules/groups/groups.service');
+const { EventsService } = require('../src/modules/events/events.service');
+const { PollsService } = require('../src/modules/polls/polls.service');
+const { FollowsService } = require('../src/modules/follows/follows.service');
+const { AchievementsService } = require('../src/modules/achievements/achievements.service');
 const { AuthService } = require('../src/modules/auth/auth.service');
 
 const integration = process.env.TEST_DATABASE_URL ? describe : describe.skip;
 integration('security regression with PostgreSQL', () => {
-  let db, schools, actors, classes, records, posts, access, comments, reactions, users, auth;
+  let db, schools, actors, classes, records, posts, access, comments, reactions, users, auth, groups, events, polls, follows, achievements, catalog;
   const notify = { notify: jest.fn().mockResolvedValue(undefined) };
   const realtime = { disconnectUser: jest.fn() };
   const pagination = { page: 1, limit: 100, skip: 0 };
@@ -55,9 +60,15 @@ integration('security regression with PostgreSQL', () => {
     reactions = new ReactionsService(db, notify, access);
     users = new UsersService(db, realtime);
     auth = new AuthService(db, jwt, config);
+    groups = new GroupsService(db, notify);
+    events = new EventsService(db);
+    polls = new PollsService(db, notify);
+    follows = new FollowsService(db, notify);
+    achievements = new AchievementsService(db, notify);
   }, 30000);
 
   afterAll(async () => {
+    if (catalog) await db.achievement.delete({ where: { id: catalog.id } });
     if (schools) await db.school.deleteMany({ where: { id: { in: schools.map(s => s.id) } } });
     if (db) await db.$disconnect();
   });
@@ -118,6 +129,104 @@ integration('security regression with PostgreSQL', () => {
     await expect(posts.create(actors[3], { groupId: records.CLUB.groupId, visibility: 'CLUB' })).rejects.toThrow('Group not found');
     await expect(posts.create(actors[4], { visibility: 'CLASS' })).rejects.toThrow('Class posts require');
     await expect(posts.create(actors[1], { visibility: 'CLUB' })).rejects.toThrow('Club posts require');
+  });
+
+  test('groups isolate reads, joining and management even for other-school staff', async () => {
+    const group = await db.group.findUnique({ where: { id: records.CLUB.groupId } });
+    await expect(groups.findOne(actors[3], group.slug)).rejects.toThrow('Group not found');
+    await expect(groups.join(actors[3], group.id)).rejects.toThrow('Group not found');
+    await expect(groups.leave(actors[3], group.id)).rejects.toThrow('Group not found');
+    await expect(groups.members(actors[3], group.id, pagination)).rejects.toThrow('Group not found');
+    await expect(groups.update(actors[3], group.id, { name: 'blocked' })).rejects.toThrow('Group not found');
+    await db.groupMember.update({ where: { groupId_userId: { groupId: group.id, userId: actors[1].id } }, data: { role: 'MODERATOR', isApproved: false } });
+    await expect(groups.update(actors[1], group.id, { name: 'blocked' })).rejects.toThrow('not a manager');
+    await expect(groups.findOne(actors[0], group.slug)).resolves.toMatchObject({ id: group.id });
+  });
+
+  test('events enforce school/group access for detail, RSVP, attendees and management', async () => {
+    const event = await events.create(actors[4], { title: 'School event', startsAt: new Date().toISOString() });
+    for (const attempt of [
+      () => events.findOne(actors[3], event.id), () => events.rsvp(actors[3], event.id, { status: 'GOING' }),
+      () => events.attendees(actors[3], event.id, pagination), () => events.update(actors[3], event.id, { title: 'blocked' }),
+    ]) await expect(attempt()).rejects.toThrow('Event not found');
+    await expect(events.create(actors[3], { title: 'blocked', startsAt: new Date().toISOString(), groupId: records.CLUB.groupId })).rejects.toThrow('Group not found');
+    await db.groupMember.create({ data: { groupId: records.CLUB.groupId, userId: actors[4].id } });
+    const clubEvent = await events.create(actors[4], { title: 'Club event', startsAt: new Date().toISOString(), groupId: records.CLUB.groupId });
+    await expect(events.findOne(actors[1], clubEvent.id)).rejects.toThrow('Event not found');
+    expect((await events.list(actors[1], pagination)).items.map(e => e.id)).not.toContain(clubEvent.id);
+    await db.event.update({ where: { id: event.id }, data: { status: 'DRAFT' } });
+    await expect(events.findOne(actors[0], event.id)).rejects.toThrow('Event not found');
+    await expect(events.findOne(actors[4], event.id)).resolves.toMatchObject({ id: event.id });
+  });
+
+  test('poll school/group/post scope and list response are consistent', async () => {
+    const poll = await polls.create(actors[4], { question: 'Choose', options: [{ label: 'A' }, { label: 'B' }] });
+    records.POLL = poll;
+    await expect(polls.findOne(actors[3], poll.id)).rejects.toThrow('Poll not found');
+    await expect(polls.results(actors[3], poll.id)).rejects.toThrow('Poll not found');
+    await expect(polls.vote(actors[3], poll.id, { optionId: poll.options[0].id })).rejects.toThrow('Poll not found');
+    await expect(polls.close(actors[3], poll.id)).rejects.toThrow('Poll not found');
+    await expect(polls.create(actors[3], { question: 'blocked', groupId: records.CLUB.groupId, options: [{ label: 'A' }, { label: 'B' }] })).rejects.toThrow('Group not found');
+    await expect(polls.create(actors[4], { type: 'ELECTION', question: 'blocked', candidates: [{ displayName: 'Foreign', userId: actors[3].id }] })).rejects.toThrow('Candidate not found');
+    const clubPoll = await polls.create(actors[4], { question: 'Club', groupId: records.CLUB.groupId, options: [{ label: 'A' }, { label: 'B' }] });
+    await expect(polls.results(actors[1], clubPoll.id)).rejects.toThrow('Poll not found');
+    const list = await polls.list(actors[1], pagination);
+    expect(list.items.find(p => p.id === poll.id)).toMatchObject({ options: expect.any(Array), myVotes: [] });
+    expect(list.items.map(p => p.id)).not.toContain(clubPoll.id);
+    await db.poll.update({ where: { id: clubPoll.id }, data: { groupId: null, postId: records.PRIVATE.id } });
+    await expect(polls.findOne(actors[1], clubPoll.id)).rejects.toThrow('Poll not found');
+  });
+
+  test('changing the vote category cannot bypass one vote per poll/category', async () => {
+    const poll = records.POLL;
+    await polls.vote(actors[1], poll.id, { optionId: poll.options[0].id });
+    await expect(polls.vote(actors[1], poll.id, { optionId: poll.options[1].id, category: 'again' })).rejects.toThrow('Invalid category');
+    await expect(polls.vote(actors[1], poll.id, { optionId: poll.options[1].id })).rejects.toThrow('already voted');
+    const pageant = await polls.create(actors[4], { type: 'PAGEANT', question: 'Choose', candidates: [
+      { displayName: 'A', category: 'Arts' }, { displayName: 'B', category: 'Arts' },
+      { displayName: 'C', category: 'Sports' },
+    ] });
+    await polls.vote(actors[1], pageant.id, { candidateId: pageant.candidates[0].id });
+    await expect(polls.vote(actors[1], pageant.id, { candidateId: pageant.candidates[1].id, category: 'fake' })).rejects.toThrow('Invalid category');
+    await expect(polls.vote(actors[1], pageant.id, { candidateId: pageant.candidates[1].id })).rejects.toThrow('already voted');
+    await expect(polls.vote(actors[1], pageant.id, { candidateId: pageant.candidates[2].id })).resolves.toMatchObject({ success: true });
+    expect(await db.vote.count({ where: { pollId: poll.id, voterId: actors[1].id } })).toBe(1);
+  });
+
+  test('concurrent votes produce one count and a controlled duplicate error', async () => {
+    const poll = records.POLL;
+    const results = await Promise.allSettled([
+      polls.vote(actors[0], poll.id, { optionId: poll.options[0].id }),
+      polls.vote(actors[0], poll.id, { optionId: poll.options[1].id }),
+    ]);
+    expect(results.filter(r => r.status === 'fulfilled')).toHaveLength(1);
+    const failed = results.find(r => r.status === 'rejected');
+    expect(failed.reason.getStatus()).toBe(400);
+    const total = await polls.results(actors[0], poll.id);
+    expect(total.totalVotes).toBe(2);
+    expect(total.options.reduce((sum, o) => sum + o.voteCount, 0)).toBe(2);
+  });
+
+  test('follows deny foreign users and filter legacy cross-school relations', async () => {
+    await expect(follows.follow(actors[0], actors[3].username)).rejects.toThrow('User not found');
+    await expect(follows.unfollow(actors[0], actors[3].username)).rejects.toThrow('User not found');
+    await expect(follows.followers(actors[3], actors[0].username, pagination)).rejects.toThrow('User not found');
+    await db.follow.create({ data: { followerId: actors[3].id, followingId: actors[0].id, status: 'PENDING' } });
+    await expect(follows.acceptRequest(actors[0], actors[3].id)).rejects.toThrow('No pending request');
+    expect((await follows.pendingRequests(actors[0], pagination)).items).toHaveLength(0);
+    await db.follow.update({ where: { followerId_followingId: { followerId: actors[3].id, followingId: actors[0].id } }, data: { status: 'ACCEPTED' } });
+    expect((await follows.followers(actors[0], actors[0].username, pagination)).items.map(u => u.id)).not.toContain(actors[3].id);
+    expect((await follows.following(actors[3], actors[3].username, pagination)).items).toHaveLength(0);
+  });
+
+  test('achievement awards require school staff and same-school recipients', async () => {
+    expect(() => achievements.createCatalog(actors[0], { name: 'blocked' })).toThrow('Only school staff');
+    catalog = await achievements.createCatalog(actors[4], { name: 'Fixture badge' });
+    await expect(achievements.award(actors[0], { achievementId: catalog.id, recipientId: actors[1].id })).rejects.toThrow('Only school staff');
+    await expect(achievements.award(actors[3], { achievementId: catalog.id, recipientId: actors[1].id })).rejects.toThrow('User not found');
+    await expect(achievements.award(actors[4], { achievementId: catalog.id, recipientId: actors[1].id })).resolves.toMatchObject({ recipientId: actors[1].id });
+    await expect(achievements.userAchievements(actors[3], actors[1].username, pagination)).rejects.toThrow('User not found');
+    expect((await achievements.userAchievements(actors[0], actors[1].username, pagination)).items).toHaveLength(1);
   });
 
   test('refresh rotation has one winner under concurrent real database transactions', async () => {

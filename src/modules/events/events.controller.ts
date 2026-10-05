@@ -36,8 +36,8 @@ export class EventsController {
 
   @Get(':id')
   @ApiOperation({ summary: 'Get an event' })
-  findOne(@Param('id') id: string) {
-    return this.events.findOne(id);
+  findOne(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+    return this.events.findOne(user, id);
   }
 
   @Patch(':id')
@@ -62,7 +62,7 @@ export class EventsController {
 
   @Get(':id/attendees')
   @ApiOperation({ summary: 'List event attendees' })
-  attendees(@Param('id') id: string, @Query() dto: PaginationDto) {
-    return this.events.attendees(id, dto);
+  attendees(@CurrentUser() user: AuthUser, @Param('id') id: string, @Query() dto: PaginationDto) {
+    return this.events.attendees(user, id, dto);
   }
 }

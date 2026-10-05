@@ -9,12 +9,14 @@ import {
   Poll,
   PollStatus,
   PollType,
+  Prisma,
   Role,
 } from '@prisma/client';
 import { AuthUser } from '@common/decorators/current-user.decorator';
 import { paginate, PaginationDto } from '@common/dto/pagination.dto';
 import { PrismaService } from '@/prisma/prisma.service';
 import { NotificationsService } from '../notifications/notifications.service';
+import { readablePostWhere } from '../posts/post-access.policy';
 import { CreatePollDto, VoteDto } from './dto/poll.dto';
 
 const ELECTION_CREATORS: Role[] = [Role.TEACHER, Role.ADMIN, Role.PRINCIPAL];
@@ -35,6 +37,18 @@ export class PollsService {
   async create(user: AuthUser, dto: CreatePollDto) {
     const type = dto.type ?? PollType.QUICK;
     this.assertCanCreate(user, type);
+    if (dto.allowMultiple || (dto.maxSelections ?? 1) !== 1) throw new BadRequestException('Multiple selections are not supported yet');
+    if (dto.groupId) {
+      const group = await this.prisma.group.findFirst({ where: {
+        id: dto.groupId, schoolId: user.schoolId, isArchived: false,
+        members: { some: { userId: user.id, isApproved: true } },
+      } });
+      if (!group) throw new NotFoundException('Group not found');
+    }
+    const candidateIds = [...new Set((dto.candidates ?? []).flatMap(c => c.userId ? [c.userId] : []))];
+    if (candidateIds.length && await this.prisma.user.count({
+      where: { id: { in: candidateIds }, schoolId: user.schoolId },
+    }) !== candidateIds.length) throw new NotFoundException('Candidate not found');
 
     if (type === PollType.QUICK) {
       if (!dto.options || dto.options.length < 2) {
@@ -91,7 +105,7 @@ export class PollsService {
 
   async list(user: AuthUser, dto: PaginationDto) {
     const where = {
-      creator: { schoolId: user.schoolId },
+      ...this.readableWhere(user),
       ...(dto.q
         ? { question: { contains: dto.q, mode: 'insensitive' as const } }
         : {}),
@@ -99,19 +113,23 @@ export class PollsService {
     const [items, total] = await this.prisma.$transaction([
       this.prisma.poll.findMany({
         where,
-        include: { _count: { select: { votes: true } } },
+        include: {
+          options: { orderBy: { position: 'asc' } }, candidates: true,
+          votes: { where: { voterId: user.id }, select: { optionId: true, candidateId: true, category: true } },
+          _count: { select: { votes: true } },
+        },
         orderBy: { createdAt: 'desc' },
         skip: dto.skip,
         take: dto.limit,
       }),
       this.prisma.poll.count({ where }),
     ]);
-    return paginate(items, total, dto.page, dto.limit);
+    return paginate(items.map(({ votes, ...poll }) => ({ ...poll, myVotes: votes })), total, dto.page, dto.limit);
   }
 
   async findOne(user: AuthUser, id: string) {
-    const poll = await this.prisma.poll.findUnique({
-      where: { id },
+    const poll = await this.prisma.poll.findFirst({
+      where: { AND: [{ id }, this.readableWhere(user)] },
       include: {
         options: { orderBy: { position: 'asc' } },
         candidates: { orderBy: { voteCount: 'desc' } },
@@ -128,41 +146,35 @@ export class PollsService {
   }
 
   async vote(user: AuthUser, pollId: string, dto: VoteDto) {
-    const poll = await this.prisma.poll.findUnique({
-      where: { id: pollId },
+    const poll = await this.prisma.poll.findFirst({
+      where: { AND: [{ id: pollId }, this.readableWhere(user)] },
       include: { options: true, candidates: true },
     });
     if (!poll) throw new NotFoundException('Poll not found');
 
     this.assertOpen(poll);
 
-    const category = dto.category ?? '';
-
     if (poll.type === PollType.QUICK) {
+      if (dto.category) throw new BadRequestException('Invalid category');
       const option = poll.options.find((o) => o.id === dto.optionId);
       if (!option) throw new BadRequestException('Invalid option');
-      return this.castVote(user.id, poll, { optionId: option.id, category });
+      return this.castVote(user.id, poll, { optionId: option.id, category: '' });
     }
 
     // ELECTION / PAGEANT — vote for a candidate, one per category.
     const candidate = poll.candidates.find((c) => c.id === dto.candidateId);
     if (!candidate) throw new BadRequestException('Invalid candidate');
-    if (poll.type === PollType.PAGEANT && !category && candidate.category) {
-      // pageant votes are scoped to the candidate's category automatically
-      return this.castVote(user.id, poll, {
-        candidateId: candidate.id,
-        category: candidate.category,
-      });
-    }
+    const category = poll.type === PollType.PAGEANT ? candidate.category ?? '' : '';
+    if (dto.category !== undefined && dto.category !== category) throw new BadRequestException('Invalid category');
     return this.castVote(user.id, poll, {
       candidateId: candidate.id,
       category,
     });
   }
 
-  async results(id: string) {
-    const poll = await this.prisma.poll.findUnique({
-      where: { id },
+  async results(user: AuthUser, id: string) {
+    const poll = await this.prisma.poll.findFirst({
+      where: { AND: [{ id }, this.readableWhere(user)] },
       include: {
         options: { orderBy: { voteCount: 'desc' } },
         candidates: { orderBy: { voteCount: 'desc' } },
@@ -231,7 +243,8 @@ export class PollsService {
       );
     }
 
-    await this.prisma.$transaction([
+    try {
+      await this.prisma.$transaction([
       this.prisma.vote.create({
         data: {
           pollId: poll.id,
@@ -257,7 +270,13 @@ export class PollsService {
             }),
           ]
         : []),
-    ]);
+      ]);
+    } catch (error) {
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+        throw new BadRequestException('You have already voted in this poll category');
+      }
+      throw error;
+    }
 
     return { success: true };
   }
@@ -287,8 +306,22 @@ export class PollsService {
     }
   }
 
+  private readableWhere(user: AuthUser): Prisma.PollWhereInput {
+    return {
+      creator: { schoolId: user.schoolId },
+      AND: [
+        { OR: [{ postId: null }, { post: readablePostWhere(user) }] },
+        { OR: [{ creatorId: user.id }, { status: { in: [PollStatus.SCHEDULED, PollStatus.OPEN, PollStatus.CLOSED] } }] },
+        { OR: [{ groupId: null }, { group: {
+          schoolId: user.schoolId, isArchived: false,
+          members: { some: { userId: user.id, isApproved: true } },
+        } }] },
+      ],
+    };
+  }
+
   private async requireCreatorOrStaff(user: AuthUser, id: string) {
-    const poll = await this.prisma.poll.findUnique({ where: { id } });
+    const poll = await this.prisma.poll.findFirst({ where: { id, creator: { schoolId: user.schoolId } } });
     if (!poll) throw new NotFoundException('Poll not found');
     const isStaff = ['ADMIN', 'PRINCIPAL', 'TEACHER'].includes(user.role);
     if (poll.creatorId !== user.id && !isStaff) {

@@ -83,9 +83,9 @@ export class GroupsService {
     return paginate(items, total, dto.page, dto.limit);
   }
 
-  async findOne(slug: string) {
-    const group = await this.prisma.group.findUnique({
-      where: { slug },
+  async findOne(user: AuthUser, slug: string) {
+    const group = await this.prisma.group.findFirst({
+      where: { slug, schoolId: user.schoolId, isArchived: false },
       include: {
         owner: { select: { id: true, username: true, fullName: true } },
         _count: { select: { members: true, posts: true } },
@@ -101,7 +101,7 @@ export class GroupsService {
   }
 
   async join(user: AuthUser, id: string) {
-    const group = await this.prisma.group.findUnique({ where: { id } });
+    const group = await this.prisma.group.findFirst({ where: { id, schoolId: user.schoolId, isArchived: false } });
     if (!group) throw new NotFoundException('Group not found');
     if (group.joinPolicy === GroupJoinPolicy.INVITE) {
       throw new ForbiddenException('This group is invite-only');
@@ -130,8 +130,8 @@ export class GroupsService {
   }
 
   async leave(user: AuthUser, id: string) {
-    const group = await this.prisma.group.findUnique({
-      where: { id },
+    const group = await this.prisma.group.findFirst({
+      where: { id, schoolId: user.schoolId },
       select: { ownerId: true },
     });
     if (!group) throw new NotFoundException('Group not found');
@@ -147,7 +147,7 @@ export class GroupsService {
   async approveMember(user: AuthUser, id: string, memberUserId: string) {
     await this.requireManager(user, id);
     const updated = await this.prisma.groupMember.updateMany({
-      where: { groupId: id, userId: memberUserId, isApproved: false },
+      where: { groupId: id, userId: memberUserId, isApproved: false, user: { schoolId: user.schoolId } },
       data: { isApproved: true },
     });
     if (updated.count === 0) {
@@ -163,8 +163,9 @@ export class GroupsService {
     return { success: true };
   }
 
-  async members(id: string, dto: PaginationDto) {
-    const where = { groupId: id, isApproved: true };
+  async members(user: AuthUser, id: string, dto: PaginationDto) {
+    await this.requireGroup(user, id);
+    const where = { groupId: id, isApproved: true, user: { schoolId: user.schoolId } };
     const [items, total] = await this.prisma.$transaction([
       this.prisma.groupMember.findMany({
         where,
@@ -192,14 +193,21 @@ export class GroupsService {
 
   /** Owner / moderator of the group, or school staff. */
   private async requireManager(user: AuthUser, groupId: string) {
+    await this.requireGroup(user, groupId);
     if (['ADMIN', 'PRINCIPAL'].includes(user.role)) return;
     const member = await this.prisma.groupMember.findUnique({
       where: { groupId_userId: { groupId, userId: user.id } },
-      select: { role: true },
+      select: { role: true, isApproved: true },
     });
-    if (!member || member.role === GroupRole.MEMBER) {
+    if (!member?.isApproved || member.role === GroupRole.MEMBER) {
       throw new ForbiddenException('You are not a manager of this group');
     }
+  }
+
+  private async requireGroup(user: AuthUser, id: string) {
+    const group = await this.prisma.group.findFirst({ where: { id, schoolId: user.schoolId, isArchived: false } });
+    if (!group) throw new NotFoundException('Group not found');
+    return group;
   }
 
   private slugify(name: string): string {

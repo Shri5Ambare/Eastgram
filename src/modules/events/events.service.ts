@@ -3,7 +3,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { EventStatus, Role } from '@prisma/client';
+import { EventStatus, Prisma, Role } from '@prisma/client';
 import { AuthUser } from '@common/decorators/current-user.decorator';
 import { paginate, PaginationDto } from '@common/dto/pagination.dto';
 import { PrismaService } from '@/prisma/prisma.service';
@@ -24,6 +24,13 @@ export class EventsService {
     if (!EVENT_CREATORS.includes(user.role as Role)) {
       throw new ForbiddenException('You are not permitted to create events');
     }
+    if (dto.groupId) {
+      const group = await this.prisma.group.findFirst({ where: {
+        id: dto.groupId, schoolId: user.schoolId, isArchived: false,
+        members: { some: { userId: user.id, isApproved: true } },
+      } });
+      if (!group) throw new NotFoundException('Group not found');
+    }
     return this.prisma.event.create({
       data: {
         schoolId: user.schoolId,
@@ -42,7 +49,7 @@ export class EventsService {
 
   async list(user: AuthUser, dto: PaginationDto) {
     const where = {
-      schoolId: user.schoolId,
+      ...this.readableWhere(user),
       status: EventStatus.PUBLISHED,
       ...(dto.q
         ? { title: { contains: dto.q, mode: 'insensitive' as const } }
@@ -64,9 +71,9 @@ export class EventsService {
     return paginate(items, total, dto.page, dto.limit);
   }
 
-  async findOne(id: string) {
-    const event = await this.prisma.event.findUnique({
-      where: { id },
+  async findOne(user: AuthUser, id: string) {
+    const event = await this.prisma.event.findFirst({
+      where: { AND: [{ id }, this.readableWhere(user)] },
       include: {
         organizer: { select: { id: true, username: true, fullName: true } },
         _count: { select: { rsvps: true } },
@@ -89,7 +96,8 @@ export class EventsService {
   }
 
   async rsvp(user: AuthUser, id: string, dto: RsvpDto) {
-    await this.findOne(id);
+    const event = await this.findOne(user, id);
+    if (event.status !== EventStatus.PUBLISHED) throw new ForbiddenException('This event is not open for RSVP');
     return this.prisma.eventRsvp.upsert({
       where: { eventId_userId: { eventId: id, userId: user.id } },
       create: { eventId: id, userId: user.id, status: dto.status },
@@ -97,8 +105,9 @@ export class EventsService {
     });
   }
 
-  async attendees(id: string, dto: PaginationDto) {
-    const where = { eventId: id };
+  async attendees(user: AuthUser, id: string, dto: PaginationDto) {
+    await this.findOne(user, id);
+    const where = { eventId: id, user: { schoolId: user.schoolId } };
     const [items, total] = await this.prisma.$transaction([
       this.prisma.eventRsvp.findMany({
         where,
@@ -120,8 +129,21 @@ export class EventsService {
     return paginate(items, total, dto.page, dto.limit);
   }
 
+  private readableWhere(user: AuthUser): Prisma.EventWhereInput {
+    return {
+      schoolId: user.schoolId,
+      AND: [
+        { OR: [{ organizerId: user.id }, { status: EventStatus.PUBLISHED }] },
+        { OR: [{ groupId: null }, { group: {
+          schoolId: user.schoolId, isArchived: false,
+          members: { some: { userId: user.id, isApproved: true } },
+        } }] },
+      ],
+    };
+  }
+
   private async requireOrganizerOrStaff(user: AuthUser, id: string) {
-    const event = await this.prisma.event.findUnique({ where: { id } });
+    const event = await this.prisma.event.findFirst({ where: { id, schoolId: user.schoolId } });
     if (!event) throw new NotFoundException('Event not found');
     const isStaff = ['ADMIN', 'PRINCIPAL'].includes(user.role);
     if (event.organizerId !== user.id && !isStaff) {
