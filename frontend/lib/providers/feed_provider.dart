@@ -3,6 +3,11 @@ import '../models/models.dart';
 import '../services/post_service.dart';
 
 class FeedProvider extends ChangeNotifier {
+  bool _disposed = false;
+  @override
+  void notifyListeners() {
+    if (!_disposed) super.notifyListeners();
+  }
   final PostService postService;
 
   List<Post> _feedPosts = [];
@@ -125,5 +130,10 @@ class FeedProvider extends ChangeNotifier {
     } catch (_) {
       // Rollback or ignore
     }
+  }
+  @override
+  void dispose() {
+    _disposed = true;
+    super.dispose();
   }
 }

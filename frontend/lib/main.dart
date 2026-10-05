@@ -39,20 +39,17 @@ void main() async {
             apiClient: apiClient,
           ),
         ),
-        ChangeNotifierProvider(
-          create: (_) => FeedProvider(postService: postService),
-        ),
-        ChangeNotifierProvider(
-          create: (_) => ChatProvider(chatService: chatService),
-        ),
       ],
-      child: const MyApp(),
+      child: MyApp(postService: postService, chatService: chatService),
     ),
   );
 }
 
 class MyApp extends StatelessWidget {
-  const MyApp({super.key});
+  final PostService? postService;
+  final ChatService? chatService;
+
+  const MyApp({super.key, this.postService, this.chatService});
 
   @override
   Widget build(BuildContext context) {
@@ -77,7 +74,20 @@ class MyApp extends StatelessWidget {
               ),
             );
           }
-          return auth.isLoggedIn ? const MainNavigation() : const LoginScreen();
+          if (!auth.isLoggedIn) return const LoginScreen();
+          // Account-scoped caches are destroyed on logout or account change.
+          return MultiProvider(
+            key: ValueKey(auth.currentUser!.id),
+            providers: [
+              ChangeNotifierProvider(create: (_) => FeedProvider(
+                postService: postService ?? PostService(apiClient: auth.apiClient),
+              )),
+              ChangeNotifierProvider(create: (_) => ChatProvider(
+                chatService: chatService ?? auth.chatService,
+              )),
+            ],
+            child: const MainNavigation(),
+          );
         },
       ),
     );

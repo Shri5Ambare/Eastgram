@@ -4,6 +4,11 @@ import '../models/models.dart';
 import '../services/chat_service.dart';
 
 class ChatProvider extends ChangeNotifier {
+  bool _disposed = false;
+  @override
+  void notifyListeners() {
+    if (!_disposed) super.notifyListeners();
+  }
   final ChatService chatService;
 
   List<Conversation> _conversations = [];
@@ -140,6 +145,7 @@ class ChatProvider extends ChangeNotifier {
 
   @override
   void dispose() {
+    _disposed = true;
     _messageSubscription?.cancel();
     super.dispose();
   }
