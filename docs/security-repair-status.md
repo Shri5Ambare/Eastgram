@@ -1,37 +1,45 @@
-# Security milestone status
+# Security and reliability repair status
 
 Baseline: `0f1b8343b6af86b9659ec44111c8ce6d55653d8a`.
+Draft pull request: https://github.com/Shri5Ambare/Eastgram/pull/1
 
-## Implemented in this change
+## Implemented
 
-- One post visibility predicate covers feed, user posts, reels, stories and direct post reads. School scoping is unconditional. Following and staff roles do not expand read audiences.
-- Private posts are author-only: the schema comment mentions tagged users, but there is no tag relation to authorize them. Class posts require matching non-null classes; club posts require approved membership in an active same-school group. Expired stories and archived posts are not publicly readable.
-- Comments, reply reads, reactions and view counters check their owning post's access. Reply parents must belong to the same post. Other-school staff cannot delete comments or modify posts.
-- Post group association must refer to an active same-school group with approved author membership. Class/club audience prerequisites are checked on create and visibility changes.
-- Admin user changes enforce administrator role and actor-school scope in the service. Assigned classes must belong to that school. Profile lookup is school-scoped.
-- Refresh rotation uses a compare-and-set update plus replacement creation in one serializable transaction; inactive accounts are rejected and token ownership is checked. Transaction conflicts fail closed.
-- Suspension/deactivation/pending status changes revoke outstanding refresh tokens. Account/permission/class changes disconnect current user sockets. New socket connections check ACTIVE status. Registration rejects foreign-school class IDs.
+- A shared post audience predicate scopes feed, profiles, reels, stories and direct reads. Other-school users, following relations and staff roles cannot enlarge read audiences. Private posts are author-only because no tagged-user relation exists.
+- Comments, reactions, replies and view counters enforce the owning post audience. Reply parents belong to the same post. Comment deletion recounts all remaining comments after nested replies cascade, with serializable conflict retries.
+- Administrator updates enforce role, school and class scope. Inactive status changes revoke refresh tokens; administrative account changes disconnect sockets.
+- Token refresh rotates once using a compare-and-set operation and replacement issuance in one serializable transaction. Inactive accounts cannot refresh. Registration assigns STUDENT/PENDING and rejects foreign-school classes.
+- Group detail/join/leave/member lists and management enforce actor-school scope. Unapproved moderators cannot manage a group. Member approval and listing filter foreign-school users.
+- Events and polls enforce school and approved membership in an active club on reads, participation and result/attendee endpoints. Management does not cross schools. Polls attached to posts inherit their post audience.
+- Poll vote categories come from the poll/candidate, preventing repeat votes through arbitrary client categories. Concurrent duplicates return a controlled 400 without incrementing counts. Unsupported multiple-selection settings are rejected explicitly. Lists now include options, candidates and the viewer's votes.
+- Follows reject other-school targets and filter legacy cross-school relations. Achievement awards require school staff and same-school recipients. The achievement catalog remains global, as defined by the existing schema.
+- Message reads/sends/read receipts require current conversation access. Every member must belong to the same school; club conversations require approved membership. Attachments belong to the sender, and reply targets belong to the same conversation. Inactive recipients cannot start a new direct conversation.
+- Realtime message delivery checks current account status and approved club membership and sends through user rooms. Stale conversation rooms grant no audience. Socket handshakes require expiry; sockets disconnect when the access token expires and recheck activity after joining.
+- Upload confirmation verifies the caller's key prefix, signed object ownership metadata, actual object size/type and object existence. Confirmation is idempotent. Post responses use signed five-minute read URLs, and `GET /media/:id/access` verifies owner/post/message access before issuing a replacement URL. Moderation does not expose private media. Unverified thumbnail URLs are omitted.
+- Flutter serializes concurrent refresh, retries requests once, preserves credentials on offline refresh failure, and reconnects sockets after rotation. Logout blocks in-flight refresh from restoring credentials, disconnects chat and guarantees local cleanup. Push setup failures do not invalidate login or prevent app startup.
 
-## Verification
+## Verification evidence
 
-- Locally passed: five dependency-free domain tests (`node --test test/post-policy.node.test.cjs`). They execute the actual query-builder policy against fixtures using a small evaluator; they do not validate Prisma SQL generation.
-- Locally passed: syntax transpilation of 79 TypeScript source files and JavaScript syntax checks for the integration test/config. This is not a full typecheck or build.
-- Dependency install blocked: offline cache lacks required Nest/Prisma dependencies; online npm registry requests were denied. Backend build and PostgreSQL tests could not run locally.
-- GitHub CI passed at commit `f54d2321131107b76ac0f9e70c6ab4634380a540`: locked installation, Prisma generation, disposable PostgreSQL schema setup, backend build, five policy tests and eight integration tests. The real-database concurrent refresh test had exactly one winner. Evidence: https://github.com/Shri5Ambare/Eastgram/actions/runs/37328802956 . This does not establish HTTP/Flutter end-to-end or staging behavior.
-- The existing dependency tree reported 82 advisories during installation (4 low, 23 moderate, 54 high, 1 critical). Detailed dependency audit, applicability assessment and compatible upgrades remain release work; avoid blind forced major upgrades.
+- Initial CI: backend build, five dependency-free policy tests and eight PostgreSQL integration tests passed.
+- Community access repairs: backend build, five policy tests and fifteen PostgreSQL tests passed.
+- Chat/media/socket repairs: backend build, five policy tests and twenty-two Jest tests (nineteen PostgreSQL cases and three socket-session cases) passed at `b4e53eb871e509fce0099b15c7f92a125ca50f41`: https://github.com/Shri5Ambare/Eastgram/actions/runs/37332800855 .
+- Compatible lockfile repair used no forced upgrades. Its installation, build and regression suite passed: https://github.com/Shri5Ambare/Eastgram/actions/runs/37331605772 . Advisories fell from 82 (including one critical) to 65: 0 critical, 42 high, 19 moderate, 4 low. Many remaining advisories require framework/toolchain major upgrades or targeted transitive dependency assessment.
+- Flutter runs with the official stable SDK. The first run passed analysis with no errors/warnings and all six session tests; its widget assertion was corrected to match the actual emoji-prefixed brand. Check the latest PR checks for the expanded suites and web build.
+- R2 signing/metadata tests use a stubbed object-store response and local signature generation, not a live R2 bucket. PostgreSQL tests use an isolated disposable service, never production. HTTP/device/staging behavior is not established by service-level tests.
 
-## Run integration checks
+## Release gates still open
 
-Use a fresh disposable PostgreSQL database only. Install locked dependencies with `npm ci`, set `DATABASE_URL` and `TEST_DATABASE_URL` to that database, run `npx prisma generate`, then `npx prisma db push --skip-generate`, `npm run build`, and `npm test -- --runInBand`. The integration suite creates uniquely named school fixtures and removes those schools afterward. It skips without TEST_DATABASE_URL; skipped integration tests do not pass the release gate. Node 24 is used for the dependency-free TypeScript policy test.
+This branch is a reviewable repair milestone, not production-release approval.
 
-## Gates still open
+1. Verify that R2 public development URLs and public custom domains are disabled for protected objects. Previously public URLs cannot be made private by API code alone. Signed URLs remain usable for up to five minutes after authorization changes. Verify R2 metadata/CORS behavior and object-size limits live; inspect legacy records and plan thumbnail handling/upload cleanup.
+2. Resolve the remaining dependency advisories with explicit migration/compatibility review, including Nest, Firebase Admin and build/test tooling. Review the production-only audit separately; advisory count is not an exploitability assessment.
+3. Verify realtime revocation across multiple instances with Redis, connection races and reconnects. Database checks and network delivery are separate operations; they do not prove instantaneous revocation.
+4. Add durable notification side-effect recovery/outbox handling so a failed notification cannot make a committed mutation appear failed. Review legacy tenant-invalid relations and the global achievement catalog before rollout.
+5. Finish device/HTTP smoke tests, Firebase production configuration, staging deployment and pilot validation.
+6. Flutter visual redesign, design-system migration and specialist visual gates remain in the approved redesign plan. Keep EduGram identity until the final product name is decided.
 
-Backend build and real-database checks now pass. G0/G1 remain open for the client/staging baseline, remaining authorization audit and dependency assessment. This branch is not a production-release approval.
+## Local verification
 
-- Audit follows, groups, polls, events, achievements, media delivery, message attachments and registration approval policy. No claim of complete tenant isolation across these untouched modules.
-- Media URLs are stored/returned as before; API audience checks alone do not make public R2 objects private. Protected media delivery needs its own implementation and tests.
-- Verify realtime revocation in a running multi-instance deployment, including connection/suspension races, token expiry and membership changes. The connection ACTIVE check and administrative disconnect are improvements, not proof of complete ongoing session enforcement.
-- Existing comment reply-deletion counter behavior, notification side-effect recovery, client refresh serialization, dependable client logout, and production Firebase setup need subsequent repairs.
-- No Flutter visual redesign, staging deployment, pilot, data migration, or production deployment is included in this security change.
+Use a fresh disposable PostgreSQL database. Run `npm ci`, set DATABASE_URL and TEST_DATABASE_URL, then `npx prisma generate`, `npx prisma db push --skip-generate`, `npm run build`, `node --test test/post-policy.node.test.cjs` and `npm test -- --runInBand`. Integration tests skip without TEST_DATABASE_URL; skipped tests do not pass the release gate.
 
-Next: resolve CI results and remaining access audit before moving to the shared Flutter design system and core-screen migration. Keep the existing EduGram identity until the final product name is decided.
+In frontend, run `flutter pub get`, `flutter analyze --no-fatal-infos`, `flutter test` and `flutter build web --release`. Informational lint hints are reported; warnings/errors fail CI.

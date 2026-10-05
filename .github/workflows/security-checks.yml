@@ -33,6 +33,8 @@ jobs:
         run: |
           npm audit --json > audit.json || true
           node -e "const a=require('./audit.json'); for (const [name,v] of Object.entries(a.vulnerabilities || {})) console.log(JSON.stringify({name,severity:v.severity,fixAvailable:v.fixAvailable,via:v.via})); console.log(JSON.stringify(a.metadata));"
+          npm audit --omit=dev --json > production-audit.json || true
+          node -e "const a=require('./production-audit.json'); console.log('Production dependency audit:', JSON.stringify(a.metadata));"
       - run: npx prisma generate
       # This database is a disposable service created above; never production.
       - run: npx prisma db push --skip-generate

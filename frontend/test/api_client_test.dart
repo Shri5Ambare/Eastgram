@@ -98,6 +98,27 @@ void main() {
     expect(storage.refresh, isNull);
   });
 
+  test('a delayed old-session rejection cannot clear a newer login', () async {
+    final storage = MemoryTokens();
+    final started = Completer<void>();
+    final release = Completer<void>();
+    var refreshes = 0;
+    final client = ApiClient(tokenStorage: storage, refreshDio: Dio()..httpClientAdapter = Adapter((_) async {
+      refreshes++; return rotated();
+    }));
+    client.dio.httpClientAdapter = Adapter((_) async {
+      started.complete(); await release.future; return response(401, {});
+    });
+    final oldRequest = client.dio.get('/posts');
+    await started.future;
+    await client.saveSession(accessToken: 'other-account', refreshToken: 'other-refresh');
+    release.complete();
+    await expectLater(oldRequest, throwsA(isA<DioException>()));
+    expect(refreshes, 0);
+    expect(storage.access, 'other-account');
+    expect(storage.refresh, 'other-refresh');
+  });
+
   test('logout during rotation cannot restore credentials or reconnect a socket', () async {
     final storage = MemoryTokens();
     final started = Completer<void>();

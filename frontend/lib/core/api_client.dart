@@ -26,6 +26,7 @@ class ApiClient {
     dio.interceptors.add(InterceptorsWrapper(
       onRequest: (options, handler) async {
         try {
+          options.extra['sessionEpoch'] ??= _sessionEpoch;
           final token = await tokenStorage.getAccessToken();
           if (token != null) options.headers['Authorization'] = 'Bearer $token';
           handler.next(options);
@@ -35,7 +36,8 @@ class ApiClient {
       },
       onError: (error, handler) async {
         final options = error.requestOptions;
-        if (error.response?.statusCode != 401 || options.path.startsWith('/auth/') || _sessionEnding) {
+        if (error.response?.statusCode != 401 || options.path.startsWith('/auth/') || _sessionEnding ||
+            options.extra['sessionEpoch'] != _sessionEpoch) {
           handler.next(error);
           return;
         }
@@ -98,6 +100,7 @@ class ApiClient {
   }
 
   Future<void> _invalidateSession() async {
+    _sessionEnding = true;
     _sessionEpoch++;
     await tokenStorage.clearTokens();
     onUnauthorized?.call();
