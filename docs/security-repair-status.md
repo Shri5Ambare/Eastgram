@@ -17,7 +17,8 @@ Baseline: `0f1b8343b6af86b9659ec44111c8ce6d55653d8a`.
 - Locally passed: five dependency-free domain tests (`node --test test/post-policy.node.test.cjs`). They execute the actual query-builder policy against fixtures using a small evaluator; they do not validate Prisma SQL generation.
 - Locally passed: syntax transpilation of 79 TypeScript source files and JavaScript syntax checks for the integration test/config. This is not a full typecheck or build.
 - Dependency install blocked: offline cache lacks required Nest/Prisma dependencies; online npm registry requests were denied. Backend build and PostgreSQL tests could not run locally.
-- Added: Jest/ts-jest configuration, eight integration tests using real Prisma/PostgreSQL, and a pull-request workflow with an isolated PostgreSQL service, generated client, backend build and tests. Full test results must be checked on the PR.
+- GitHub CI passed at commit `f54d2321131107b76ac0f9e70c6ab4634380a540`: locked installation, Prisma generation, disposable PostgreSQL schema setup, backend build, five policy tests and eight integration tests. The real-database concurrent refresh test had exactly one winner. Evidence: https://github.com/Shri5Ambare/Eastgram/actions/runs/37328802956 . This does not establish HTTP/Flutter end-to-end or staging behavior.
+- The existing dependency tree reported 82 advisories during installation (4 low, 23 moderate, 54 high, 1 critical). Detailed dependency audit, applicability assessment and compatible upgrades remain release work; avoid blind forced major upgrades.
 
 ## Run integration checks
 
@@ -25,7 +26,7 @@ Use a fresh disposable PostgreSQL database only. Install locked dependencies wit
 
 ## Gates still open
 
-G0/G1 remain open until full build and real database checks pass and the remaining authorization audit is complete. This branch is not a production-release approval.
+Backend build and real-database checks now pass. G0/G1 remain open for the client/staging baseline, remaining authorization audit and dependency assessment. This branch is not a production-release approval.
 
 - Audit follows, groups, polls, events, achievements, media delivery, message attachments and registration approval policy. No claim of complete tenant isolation across these untouched modules.
 - Media URLs are stored/returned as before; API audience checks alone do not make public R2 objects private. Protected media delivery needs its own implementation and tests.
