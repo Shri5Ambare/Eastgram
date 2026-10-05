@@ -28,6 +28,10 @@ export class RealtimeService {
     this.server?.to(`conversation:${conversationId}`).emit(event, payload);
   }
 
+  disconnectUser(userId: string) {
+    this.server?.in(`user:${userId}`).disconnectSockets(true);
+  }
+
   joinConversation(userId: string, conversationId: string) {
     this.server
       ?.in(`user:${userId}`)

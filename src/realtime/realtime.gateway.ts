@@ -9,6 +9,7 @@ import {
   WebSocketServer,
 } from '@nestjs/websockets';
 import { Server, Socket } from 'socket.io';
+import { UserStatus } from '@prisma/client';
 import { PrismaService } from '@/prisma/prisma.service';
 import { RedisService } from '@/redis/redis.service';
 import { RealtimeService } from './realtime.service';
@@ -54,6 +55,11 @@ export class RealtimeGateway
       return;
     }
 
+    const user = await this.prisma.user.findUnique({ where: { id: auth.userId }, select: { status: true, schoolId: true } });
+    if (!user || user.status !== UserStatus.ACTIVE) {
+      client.disconnect(true);
+      return;
+    }
     client.userId = auth.userId;
     client.join(`user:${auth.userId}`);
 

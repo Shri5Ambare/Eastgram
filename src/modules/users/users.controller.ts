@@ -45,9 +45,9 @@ export class UsersController {
   @ApiOperation({ summary: 'Get a user profile by username' })
   profile(
     @Param('username') username: string,
-    @CurrentUser('id') viewerId: string,
+    @CurrentUser() viewer: AuthUser,
   ) {
-    return this.users.getProfile(username, viewerId);
+    return this.users.getProfile(username, viewer);
   }
 
   @Patch(':id/admin')
@@ -55,7 +55,7 @@ export class UsersController {
   @ApiOperation({
     summary: 'Admin/Principal: set role, status, messaging permission',
   })
-  adminUpdate(@Param('id') id: string, @Body() dto: AdminUpdateUserDto) {
-    return this.users.adminUpdate(id, dto);
+  adminUpdate(@CurrentUser() actor: AuthUser, @Param('id') id: string, @Body() dto: AdminUpdateUserDto) {
+    return this.users.adminUpdate(actor, id, dto);
   }
 }

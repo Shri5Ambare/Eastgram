@@ -3,10 +3,12 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { FollowStatus, Post, PostType, Prisma } from '@prisma/client';
+import { FollowStatus, PostType, Prisma } from '@prisma/client';
 import { AuthUser } from '@common/decorators/current-user.decorator';
 import { paginate, PaginationDto } from '@common/dto/pagination.dto';
 import { PrismaService } from '@/prisma/prisma.service';
+import { PostAccessService } from './post-access.service';
+import { readablePostWhere } from './post-access.policy';
 import { CreatePostDto, UpdatePostDto } from './dto/post.dto';
 
 const STORY_TTL_MS = 24 * 60 * 60 * 1000;
@@ -31,10 +33,11 @@ const POST_INCLUDE = {
 
 @Injectable()
 export class PostsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(private readonly prisma: PrismaService, private readonly access: PostAccessService) {}
 
   async create(user: AuthUser, dto: CreatePostDto) {
     const type = dto.type ?? PostType.POST;
+    await this.access.validateAudience(user, dto.visibility ?? 'SCHOOL', dto.groupId);
 
     // Verify the referenced media belongs to the author.
     if (dto.mediaIds?.length) {
@@ -81,9 +84,7 @@ export class PostsService {
 
     const where: Prisma.PostWhereInput = {
       type: PostType.POST,
-      isArchived: false,
-      author: { schoolId: user.schoolId },
-      OR: [{ authorId: { in: authorIds } }, { visibility: 'SCHOOL' }],
+      AND: [readablePostWhere(user), { OR: [{ authorId: { in: authorIds } }, { visibility: 'SCHOOL' }] }],
     };
 
     return this.queryPosts(where, dto);
@@ -94,8 +95,7 @@ export class PostsService {
     return this.queryPosts(
       {
         type: PostType.REEL,
-        isArchived: false,
-        author: { schoolId: user.schoolId },
+        AND: [readablePostWhere(user)],
       },
       dto,
     );
@@ -114,29 +114,29 @@ export class PostsService {
       where: {
         type: PostType.STORY,
         authorId: { in: authorIds },
-        expiresAt: { gt: new Date() },
+        AND: [readablePostWhere(user)],
       },
       include: POST_INCLUDE,
       orderBy: { createdAt: 'desc' },
     });
   }
 
-  async userPosts(username: string, type: PostType, dto: PaginationDto) {
-    const author = await this.prisma.user.findUnique({
-      where: { username },
+  async userPosts(user: AuthUser, username: string, type: PostType, dto: PaginationDto) {
+    const author = await this.prisma.user.findFirst({
+      where: { username, schoolId: user.schoolId },
       select: { id: true },
     });
     if (!author) throw new NotFoundException('User not found');
 
     return this.queryPosts(
-      { authorId: author.id, type, isArchived: false },
+      { authorId: author.id, type, AND: [readablePostWhere(user)] },
       dto,
     );
   }
 
-  async findOne(id: string) {
-    const post = await this.prisma.post.findUnique({
-      where: { id },
+  async findOne(user: AuthUser, id: string) {
+    const post = await this.prisma.post.findFirst({
+      where: { AND: [{ id }, readablePostWhere(user)] },
       include: POST_INCLUDE,
     });
     if (!post || post.isArchived) throw new NotFoundException('Post not found');
@@ -144,7 +144,11 @@ export class PostsService {
   }
 
   async update(user: AuthUser, id: string, dto: UpdatePostDto) {
-    await this.ensureOwnerOrStaff(user, id);
+    const post = await this.ensureOwnerOrStaff(user, id);
+    if (dto.visibility != null) {
+      const author = await this.prisma.user.findUnique({ where: { id: post.authorId }, select: { classId: true } });
+      await this.access.validateAudience({ ...user, id: post.authorId, classId: author?.classId ?? null }, dto.visibility, post.groupId);
+    }
     return this.prisma.post.update({
       where: { id },
       data: dto,
@@ -158,9 +162,10 @@ export class PostsService {
     return { success: true };
   }
 
-  async registerView(id: string) {
+  async registerView(user: AuthUser, id: string) {
+    await this.access.requireReadable(user, id);
     await this.prisma.post.updateMany({
-      where: { id },
+      where: { AND: [{ id }, readablePostWhere(user)] },
       data: { viewCount: { increment: 1 } },
     });
     return { success: true };
@@ -182,8 +187,8 @@ export class PostsService {
     return paginate(items, total, dto.page, dto.limit);
   }
 
-  private async ensureOwnerOrStaff(user: AuthUser, postId: string): Promise<Post> {
-    const post = await this.prisma.post.findUnique({ where: { id: postId } });
+  private async ensureOwnerOrStaff(user: AuthUser, postId: string) {
+    const post = await this.prisma.post.findFirst({ where: { id: postId, author: { schoolId: user.schoolId } } });
     if (!post) throw new NotFoundException('Post not found');
 
     const isStaff = ['ADMIN', 'PRINCIPAL', 'TEACHER'].includes(user.role);

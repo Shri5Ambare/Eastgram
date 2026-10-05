@@ -1,11 +1,12 @@
 import {
+  BadRequestException,
   ConflictException,
   Injectable,
   UnauthorizedException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
-import { Role, User, UserStatus } from '@prisma/client';
+import { Prisma, Role, User, UserStatus } from '@prisma/client';
 import * as argon2 from 'argon2';
 import { createHash, randomBytes } from 'crypto';
 import { PrismaService } from '@/prisma/prisma.service';
@@ -25,8 +26,12 @@ export class AuthService {
   ) {}
 
   async register(dto: RegisterDto) {
+    if (dto.classId) {
+      const schoolClass = await this.prisma.schoolClass.findFirst({ where: { id: dto.classId, schoolId: dto.schoolId }, select: { id: true } });
+      if (!schoolClass) throw new BadRequestException('Class does not belong to this school');
+    }
     const existing = await this.prisma.user.findFirst({
-      where: { OR: [{ email: dto.email }, { username: dto.username }] },
+      where: { OR: [{ email: dto.email.toLowerCase() }, { username: dto.username }] },
       select: { id: true },
     });
     if (existing) {
@@ -85,27 +90,31 @@ export class AuthService {
       throw new UnauthorizedException('Invalid refresh token');
     }
 
-    const tokenHash = this.hashToken(dto.refreshToken);
-    const stored = await this.prisma.refreshToken.findUnique({
-      where: { tokenHash },
-    });
-
-    if (!stored || stored.revokedAt || stored.expiresAt < new Date()) {
-      throw new UnauthorizedException('Refresh token expired or revoked');
+    if (typeof payload.sub !== 'string' || !payload.sub) {
+      throw new UnauthorizedException('Invalid refresh token');
     }
-
-    // Rotate: revoke the old token, issue a fresh pair.
-    await this.prisma.refreshToken.update({
-      where: { id: stored.id },
-      data: { revokedAt: new Date() },
-    });
-
-    const user = await this.prisma.user.findUnique({
-      where: { id: payload.sub },
-    });
-    if (!user) throw new UnauthorizedException('User no longer exists');
-
-    return this.issueTokens(user, ctx);
+    const tokenHash = this.hashToken(dto.refreshToken);
+    try {
+      return await this.prisma.$transaction(async (tx) => {
+        const user = await tx.user.findUnique({ where: { id: payload.sub } });
+        if (!user || user.status !== UserStatus.ACTIVE) {
+          throw new UnauthorizedException('Account is not active');
+        }
+        // Compare-and-set: exactly one request can consume this token. Issuing
+        // its replacement in the same transaction rolls consumption back on failure.
+        const consumed = await tx.refreshToken.updateMany({
+          where: { tokenHash, userId: user.id, revokedAt: null, expiresAt: { gt: new Date() } },
+          data: { revokedAt: new Date() },
+        });
+        if (consumed.count !== 1) throw new UnauthorizedException('Refresh token expired or revoked');
+        return this.issueTokens(user, ctx, tx);
+      }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+    } catch (error) {
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2034') {
+        throw new UnauthorizedException('Refresh token already used; sign in again');
+      }
+      throw error;
+    }
   }
 
   async logout(refreshToken: string) {
@@ -119,7 +128,7 @@ export class AuthService {
 
   // ───────────────────────── helpers ─────────────────────────
 
-  private async issueTokens(user: User, ctx: TokenContext) {
+  private async issueTokens(user: User, ctx: TokenContext, db: Prisma.TransactionClient | PrismaService = this.prisma) {
     const accessToken = await this.jwt.signAsync(
       { sub: user.id, email: user.email, role: user.role },
       {
@@ -137,7 +146,7 @@ export class AuthService {
     );
 
     const decoded = this.jwt.decode(refreshToken) as { exp: number };
-    await this.prisma.refreshToken.create({
+    await db.refreshToken.create({
       data: {
         userId: user.id,
         tokenHash: this.hashToken(refreshToken),

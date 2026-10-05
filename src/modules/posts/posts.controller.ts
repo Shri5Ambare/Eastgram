@@ -59,11 +59,12 @@ export class PostsController {
   @ApiOperation({ summary: 'Posts authored by a user' })
   @ApiQuery({ name: 'type', enum: PostType, required: false })
   userPosts(
+    @CurrentUser() user: AuthUser,
     @Param('username') username: string,
     @Query() dto: PaginationDto,
     @Query('type') type: PostType = PostType.POST,
   ) {
-    return this.posts.userPosts(username, type, dto);
+    return this.posts.userPosts(user, username, type, dto);
   }
 
   // ───────────────────────── posts ─────────────────────────
@@ -76,8 +77,8 @@ export class PostsController {
 
   @Get('posts/:id')
   @ApiOperation({ summary: 'Get a single post' })
-  findOne(@Param('id') id: string) {
-    return this.posts.findOne(id);
+  findOne(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+    return this.posts.findOne(user, id);
   }
 
   @Patch('posts/:id')
@@ -98,8 +99,8 @@ export class PostsController {
 
   @Post('posts/:id/view')
   @ApiOperation({ summary: 'Register a view (reels/stories)' })
-  view(@Param('id') id: string) {
-    return this.posts.registerView(id);
+  view(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+    return this.posts.registerView(user, id);
   }
 
   // ───────────────────────── reactions ─────────────────────────
@@ -107,21 +108,21 @@ export class PostsController {
   @Post('posts/:id/react')
   @ApiOperation({ summary: 'Toggle a reaction on a post' })
   reactPost(
-    @CurrentUser('id') userId: string,
+    @CurrentUser() user: AuthUser,
     @Param('id') id: string,
     @Body() dto: ReactDto,
   ) {
-    return this.reactions.togglePost(userId, id, dto.type ?? 'LIKE');
+    return this.reactions.togglePost(user, id, dto.type ?? 'LIKE');
   }
 
   @Post('comments/:id/react')
   @ApiOperation({ summary: 'Toggle a reaction on a comment' })
   reactComment(
-    @CurrentUser('id') userId: string,
+    @CurrentUser() user: AuthUser,
     @Param('id') id: string,
     @Body() dto: ReactDto,
   ) {
-    return this.reactions.toggleComment(userId, id, dto.type ?? 'LIKE');
+    return this.reactions.toggleComment(user, id, dto.type ?? 'LIKE');
   }
 
   // ───────────────────────── comments ─────────────────────────
@@ -138,14 +139,14 @@ export class PostsController {
 
   @Get('posts/:id/comments')
   @ApiOperation({ summary: 'List top-level comments on a post' })
-  listComments(@Param('id') id: string, @Query() dto: PaginationDto) {
-    return this.comments.list(id, dto);
+  listComments(@CurrentUser() user: AuthUser, @Param('id') id: string, @Query() dto: PaginationDto) {
+    return this.comments.list(user, id, dto);
   }
 
   @Get('comments/:id/replies')
   @ApiOperation({ summary: 'List replies to a comment' })
-  replies(@Param('id') id: string, @Query() dto: PaginationDto) {
-    return this.comments.replies(id, dto);
+  replies(@CurrentUser() user: AuthUser, @Param('id') id: string, @Query() dto: PaginationDto) {
+    return this.comments.replies(user, id, dto);
   }
 
   @Delete('comments/:id')
