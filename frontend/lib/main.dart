@@ -16,7 +16,11 @@ import 'ui/screens/main_navigation.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  await Firebase.initializeApp();
+  try {
+    await Firebase.initializeApp();
+  } catch (error) {
+    debugPrint('Push notifications unavailable: $error');
+  }
 
   final tokenStorage = TokenStorage();
   final apiClient = ApiClient(tokenStorage: tokenStorage);

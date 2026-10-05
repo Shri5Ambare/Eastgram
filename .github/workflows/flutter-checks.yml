@@ -1,0 +1,25 @@
+name: Flutter client checks
+on:
+  pull_request:
+  push:
+    branches: [master, codex/security-foundation]
+permissions:
+  contents: read
+jobs:
+  flutter-client:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install official Flutter stable SDK
+        run: |
+          git clone --depth 1 --branch stable https://github.com/flutter/flutter.git "$RUNNER_TEMP/flutter"
+          echo "$RUNNER_TEMP/flutter/bin" >> "$GITHUB_PATH"
+      - run: flutter --version
+      - run: flutter pub get
+        working-directory: frontend
+      - run: flutter analyze --no-fatal-infos
+        working-directory: frontend
+      - run: flutter test
+        working-directory: frontend
+      - run: flutter build web --release
+        working-directory: frontend
