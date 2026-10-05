@@ -11,11 +11,11 @@ jobs:
     name: Deploy Backend to Fly.io
     runs-on: ubuntu-latest
     if: |
-      contains(toJson(github.event.commits.*.modified + github.event.commits.*.added + github.event.commits.*.removed), 'src/') ||
-      contains(toJson(github.event.commits.*.modified + github.event.commits.*.added + github.event.commits.*.removed), 'prisma/') ||
-      contains(toJson(github.event.commits.*.modified + github.event.commits.*.added + github.event.commits.*.removed), 'Dockerfile') ||
-      contains(toJson(github.event.commits.*.modified + github.event.commits.*.added + github.event.commits.*.removed), 'fly.toml') ||
-      contains(toJson(github.event.commits.*.modified + github.event.commits.*.added + github.event.commits.*.removed), '.github/workflows/deploy.yml')
+      contains(toJson(github.event.commits), 'src/') ||
+      contains(toJson(github.event.commits), 'prisma/') ||
+      contains(toJson(github.event.commits), 'Dockerfile') ||
+      contains(toJson(github.event.commits), 'fly.toml') ||
+      contains(toJson(github.event.commits), '.github/workflows/deploy.yml')
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -32,8 +32,8 @@ jobs:
     name: Deploy Frontend to Vercel
     runs-on: ubuntu-latest
     if: |
-      contains(toJson(github.event.commits.*.modified + github.event.commits.*.added + github.event.commits.*.removed), 'frontend/') ||
-      contains(toJson(github.event.commits.*.modified + github.event.commits.*.added + github.event.commits.*.removed), '.github/workflows/deploy.yml')
+      contains(toJson(github.event.commits), 'frontend/') ||
+      contains(toJson(github.event.commits), '.github/workflows/deploy.yml')
     steps:
       - name: Checkout code
         uses: actions/checkout@v4

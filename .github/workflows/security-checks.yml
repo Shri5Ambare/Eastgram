@@ -2,7 +2,7 @@ name: Security regression checks
 on:
   pull_request:
   push:
-    branches: [master]
+    branches: [master, codex/security-foundation]
 permissions:
   contents: read
 jobs:
