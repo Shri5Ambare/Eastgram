@@ -51,15 +51,15 @@ void main() {
     );
     await tester.pumpWidget(ChangeNotifierProvider.value(value: auth, child: const MyApp()));
     await tester.pumpAndSettle();
-    await auth.login('first', 'password');
+    await tester.runAsync(() => auth.login('first', 'password'));
     await tester.pumpAndSettle();
     final firstContext = tester.element(find.byType(MainNavigation));
     final firstFeed = Provider.of<FeedProvider>(firstContext, listen: false);
     final firstChat = Provider.of<ChatProvider>(firstContext, listen: false);
-    await auth.logout();
+    await tester.runAsync(auth.logout);
     await tester.pumpAndSettle();
     userId = 'second';
-    await auth.login('second', 'password');
+    await tester.runAsync(() => auth.login('second', 'password'));
     await tester.pumpAndSettle();
     final secondContext = tester.element(find.byType(MainNavigation));
     expect(identical(firstFeed, Provider.of<FeedProvider>(secondContext, listen: false)), isFalse);
