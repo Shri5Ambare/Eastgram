@@ -316,6 +316,21 @@ integration('security regression with PostgreSQL', () => {
     await expect(media.access(actors[1], records.MEDIA.id)).rejects.toThrow('Media not found');
   });
 
+  test('deleting a comment counts all cascaded replies and handles concurrent deletions', async () => {
+    const post = await posts.create(actors[0], { visibility: 'SCHOOL' });
+    const root = await comments.create(actors[0], post.id, { body: 'root' });
+    const reply = await comments.create(actors[1], post.id, { body: 'reply', parentId: root.id });
+    await comments.create(actors[0], post.id, { body: 'nested reply', parentId: reply.id });
+    const other = await comments.create(actors[0], post.id, { body: 'keep' });
+    expect((await db.post.findUnique({ where: { id: post.id } })).commentCount).toBe(4);
+    await comments.remove(actors[0], root.id);
+    expect((await db.post.findUnique({ where: { id: post.id } })).commentCount).toBe(1);
+    expect(await db.comment.count({ where: { postId: post.id } })).toBe(1);
+    const another = await comments.create(actors[0], post.id, { body: 'second' });
+    await Promise.all([comments.remove(actors[0], other.id), comments.remove(actors[0], another.id)]);
+    expect((await db.post.findUnique({ where: { id: post.id } })).commentCount).toBe(0);
+  });
+
   test('refresh rotation has one winner under concurrent real database transactions', async () => {
     // Direct invocation of the service's token helper seeds a valid test session.
     const session = await auth.issueTokens(actors[1], {});

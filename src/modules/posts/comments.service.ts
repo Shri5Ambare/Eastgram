@@ -3,7 +3,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { NotificationType } from '@prisma/client';
+import { NotificationType, Prisma } from '@prisma/client';
 import { AuthUser } from '@common/decorators/current-user.decorator';
 import { paginate, PaginationDto } from '@common/dto/pagination.dto';
 import { PrismaService } from '@/prisma/prisma.service';
@@ -113,13 +113,20 @@ export class CommentsService {
       throw new ForbiddenException('You cannot delete this comment');
     }
 
-    await this.prisma.$transaction([
-      this.prisma.comment.delete({ where: { id: commentId } }),
-      this.prisma.post.update({
-        where: { id: comment.postId },
-        data: { commentCount: { decrement: 1 } },
-      }),
-    ]);
+    // Replies cascade at arbitrary depth; recount the remaining rows atomically.
+    for (let attempt = 0; ; attempt++) {
+      try {
+        await this.prisma.$transaction(async tx => {
+          await tx.comment.deleteMany({ where: { id: commentId, postId: comment.postId } });
+          const remaining = await tx.comment.count({ where: { postId: comment.postId } });
+          await tx.post.update({ where: { id: comment.postId }, data: { commentCount: remaining } });
+        }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+        break;
+      } catch (error) {
+        if (attempt < 2 && error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2034') continue;
+        throw error;
+      }
+    }
     return { success: true };
   }
 }

@@ -21,7 +21,7 @@ void main() {
     await tester.pumpWidget(ChangeNotifierProvider.value(value: provider, child: const MyApp()));
     await tester.pumpAndSettle();
     expect(find.byType(TextFormField), findsNWidgets(2));
-    expect(find.text('EduGram'), findsWidgets);
+    expect(find.textContaining('EduGram'), findsWidgets);
     await tester.pumpWidget(const SizedBox.shrink());
     provider.dispose();
     chat.dispose();

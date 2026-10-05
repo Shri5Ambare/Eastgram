@@ -23,11 +23,11 @@ void main() {
     final client = ApiClient(tokenStorage: storage);
     String? revoked;
     client.dio.httpClientAdapter = Adapter((options) async {
-      if (options.path == '/auth/login') return response(200, {'data': {
+      if (options.path == '/auth/login') { return response(200, {'data': {
         'accessToken': 'access', 'refreshToken': 'refresh',
         'user': {'id': 'u', 'schoolId': 's', 'email': 'u@example.test', 'username': 'user',
           'fullName': 'User', 'role': 'STUDENT', 'status': 'ACTIVE'},
-      }});
+      }}); }
       if (options.path == '/auth/logout') { revoked = options.data['refreshToken'] as String; return response(200, {}); }
       return response(401, {});
     });
