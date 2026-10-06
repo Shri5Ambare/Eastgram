@@ -1,7 +1,7 @@
 module.exports = {
   testEnvironment: 'node',
   testMatch: ['<rootDir>/test/**/*.spec.js'],
-  transform: { '^.+\\.ts$': ['ts-jest', { tsconfig: 'tsconfig.json' }] },
+  transform: { '^.+\\.ts$': '<rootDir>/test/typescript-transform.cjs' },
   moduleNameMapper: {
     '^@/(.*)$': '<rootDir>/src/$1',
     '^@common/(.*)$': '<rootDir>/src/common/$1',
