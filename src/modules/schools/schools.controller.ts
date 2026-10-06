@@ -1,6 +1,7 @@
 import { Body, Controller, Get, Param, Post } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { Role } from '@prisma/client';
+import { AuthUser, CurrentUser } from '@common/decorators/current-user.decorator';
 import { Public } from '@common/decorators/public.decorator';
 import { Roles } from '@common/decorators/roles.decorator';
 import { CreateClassDto, CreateSchoolDto } from './dto/school.dto';
@@ -37,7 +38,7 @@ export class SchoolsController {
   @ApiBearerAuth()
   @Roles(Role.ADMIN, Role.PRINCIPAL)
   @ApiOperation({ summary: 'Create a class (admin)' })
-  createClass(@Param('id') id: string, @Body() dto: CreateClassDto) {
-    return this.schools.createClass(id, dto);
+  createClass(@CurrentUser() user: AuthUser, @Param('id') id: string, @Body() dto: CreateClassDto) {
+    return this.schools.createClass(user, id, dto);
   }
 }

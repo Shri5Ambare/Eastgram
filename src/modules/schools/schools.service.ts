@@ -1,4 +1,5 @@
-import { Injectable } from '@nestjs/common';
+import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import { AuthUser } from '@common/decorators/current-user.decorator';
 import { PrismaService } from '@/prisma/prisma.service';
 import { CreateClassDto, CreateSchoolDto } from './dto/school.dto';
 
@@ -14,7 +15,9 @@ export class SchoolsService {
     return this.prisma.school.findMany({ orderBy: { name: 'asc' } });
   }
 
-  createClass(schoolId: string, dto: CreateClassDto) {
+  createClass(user: AuthUser, schoolId: string, dto: CreateClassDto) {
+    if (!['ADMIN', 'PRINCIPAL'].includes(user.role)) throw new ForbiddenException('Only school administrators can create classes');
+    if (schoolId !== user.schoolId) throw new NotFoundException('School not found');
     return this.prisma.schoolClass.create({
       data: { schoolId, ...dto },
     });
