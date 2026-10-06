@@ -115,6 +115,16 @@ integration('compiled HTTP application', () => {
     expect(created.body.data.schoolId).toBe(schools[0].id);
     expect(created.body.data.status).toBe('PENDING');
     expect((await request('/auth/login', null, 'POST', { identifier: users[1].email, password: 'integration-password' })).status).toBe(401);
+    const { JwtService } = require('@nestjs/jwt');
+    const { createHash } = require('node:crypto');
+    const legacyRefresh = new JwtService().sign({ sub: users[1].id, jti: randomUUID() },
+      { secret: 'http-test-refresh-secret-only', expiresIn: '5m' });
+    await db.refreshToken.create({ data: { userId: users[1].id,
+      tokenHash: createHash('sha256').update(legacyRefresh).digest('hex'), expiresAt: new Date(Date.now() + 300000) } });
+    expect((await request('/auth/refresh', null, 'POST', { refreshToken: legacyRefresh })).status).toBe(401);
+    const foreignClass = await db.schoolClass.create({ data: { schoolId: schools[1].id, name: 'legacy class' } });
+    expect((await request('/auth/register', null, 'POST', { ...registration, username: 'other' + suffix.replaceAll('-', '').slice(0, 20),
+      email: 'other' + suffix + '@example.test', classId: foreignClass.id })).status).toBe(400);
     expect((await request('/school/classes', tokens[1], 'POST', { name: 'blocked' })).status).toBe(401);
   });
 
