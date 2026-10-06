@@ -1,6 +1,6 @@
-import { Body, Controller, Post } from '@nestjs/common';
+import { Body, Controller, Get, Param, Post } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
-import { CurrentUser } from '@common/decorators/current-user.decorator';
+import { AuthUser, CurrentUser } from '@common/decorators/current-user.decorator';
 import { ConfirmUploadDto, PresignUploadDto } from './dto/media.dto';
 import { MediaService } from './media.service';
 
@@ -9,6 +9,12 @@ import { MediaService } from './media.service';
 @Controller('media')
 export class MediaController {
   constructor(private readonly media: MediaService) {}
+
+  @Get(':id/access')
+  @ApiOperation({ summary: 'Get a short-lived media URL after audience authorization' })
+  access(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+    return this.media.access(user, id);
+  }
 
   @Post('presign')
   @ApiOperation({ summary: 'Get a presigned R2 URL for direct upload' })

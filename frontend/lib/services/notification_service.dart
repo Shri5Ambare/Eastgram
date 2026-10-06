@@ -13,7 +13,7 @@ class NotificationService {
   bool _initialized = false;
 
   Future<void> initialize() async {
-    if (_initialized) return;
+    if (_initialized || Firebase.apps.isEmpty) return;
 
     FirebaseMessaging.onBackgroundMessage(_firebaseMessagingBackgroundHandler);
 
@@ -38,6 +38,7 @@ class NotificationService {
 
   Future<String?> getDeviceToken() async {
     try {
+      if (Firebase.apps.isEmpty) return null;
       return await FirebaseMessaging.instance.getToken();
     } catch (_) {
       return null;

@@ -3,6 +3,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
+import { AuthUser } from '@common/decorators/current-user.decorator';
 import { FollowStatus, NotificationType } from '@prisma/client';
 import { PrismaService } from '@/prisma/prisma.service';
 import { paginate, PaginationDto } from '@common/dto/pagination.dto';
@@ -15,9 +16,10 @@ export class FollowsService {
     private readonly notifications: NotificationsService,
   ) {}
 
-  async follow(followerId: string, targetUsername: string) {
-    const target = await this.prisma.user.findUnique({
-      where: { username: targetUsername },
+  async follow(user: AuthUser, targetUsername: string) {
+    const followerId = user.id;
+    const target = await this.prisma.user.findFirst({
+      where: { username: targetUsername, schoolId: user.schoolId },
       select: { id: true, isPrivate: true, fullName: true },
     });
     if (!target) throw new NotFoundException('User not found');
@@ -58,9 +60,10 @@ export class FollowsService {
     return follow;
   }
 
-  async unfollow(followerId: string, targetUsername: string) {
-    const target = await this.prisma.user.findUnique({
-      where: { username: targetUsername },
+  async unfollow(user: AuthUser, targetUsername: string) {
+    const followerId = user.id;
+    const target = await this.prisma.user.findFirst({
+      where: { username: targetUsername, schoolId: user.schoolId },
       select: { id: true },
     });
     if (!target) throw new NotFoundException('User not found');
@@ -72,12 +75,14 @@ export class FollowsService {
   }
 
   /** Target user approves a pending follow request. */
-  async acceptRequest(userId: string, followerId: string) {
+  async acceptRequest(user: AuthUser, followerId: string) {
+    const userId = user.id;
     const result = await this.prisma.follow.updateMany({
       where: {
         followerId,
         followingId: userId,
         status: FollowStatus.PENDING,
+        follower: { schoolId: user.schoolId },
       },
       data: { status: FollowStatus.ACCEPTED },
     });
@@ -94,9 +99,9 @@ export class FollowsService {
     return { success: true };
   }
 
-  async followers(username: string, dto: PaginationDto) {
-    const user = await this.requireUser(username);
-    const where = { followingId: user.id, status: FollowStatus.ACCEPTED };
+  async followers(viewer: AuthUser, username: string, dto: PaginationDto) {
+    const user = await this.requireUser(viewer, username);
+    const where = { followingId: user.id, status: FollowStatus.ACCEPTED, follower: { schoolId: viewer.schoolId } };
     const [items, total] = await this.prisma.$transaction([
       this.prisma.follow.findMany({
         where,
@@ -115,9 +120,9 @@ export class FollowsService {
     );
   }
 
-  async following(username: string, dto: PaginationDto) {
-    const user = await this.requireUser(username);
-    const where = { followerId: user.id, status: FollowStatus.ACCEPTED };
+  async following(viewer: AuthUser, username: string, dto: PaginationDto) {
+    const user = await this.requireUser(viewer, username);
+    const where = { followerId: user.id, status: FollowStatus.ACCEPTED, following: { schoolId: viewer.schoolId } };
     const [items, total] = await this.prisma.$transaction([
       this.prisma.follow.findMany({
         where,
@@ -136,8 +141,8 @@ export class FollowsService {
     );
   }
 
-  async pendingRequests(userId: string, dto: PaginationDto) {
-    const where = { followingId: userId, status: FollowStatus.PENDING };
+  async pendingRequests(user: AuthUser, dto: PaginationDto) {
+    const where = { followingId: user.id, status: FollowStatus.PENDING, follower: { schoolId: user.schoolId } };
     const [items, total] = await this.prisma.$transaction([
       this.prisma.follow.findMany({
         where,
@@ -151,9 +156,9 @@ export class FollowsService {
     return paginate(items, total, dto.page, dto.limit);
   }
 
-  private async requireUser(username: string) {
-    const user = await this.prisma.user.findUnique({
-      where: { username },
+  private async requireUser(viewer: AuthUser, username: string) {
+    const user = await this.prisma.user.findFirst({
+      where: { username, schoolId: viewer.schoolId },
       select: { id: true },
     });
     if (!user) throw new NotFoundException('User not found');

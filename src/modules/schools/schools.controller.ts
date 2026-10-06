@@ -1,43 +1,32 @@
-import { Body, Controller, Get, Param, Post } from '@nestjs/common';
+import { Body, Controller, Get, Post } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { Role } from '@prisma/client';
+import { AuthUser, CurrentUser } from '@common/decorators/current-user.decorator';
 import { Public } from '@common/decorators/public.decorator';
 import { Roles } from '@common/decorators/roles.decorator';
-import { CreateClassDto, CreateSchoolDto } from './dto/school.dto';
+import { CreateClassDto } from './dto/school.dto';
 import { SchoolsService } from './schools.service';
 
-@ApiTags('schools')
-@Controller('schools')
+@ApiTags('school')
+@Controller('school')
 export class SchoolsController {
   constructor(private readonly schools: SchoolsService) {}
 
   @Public()
   @Get()
-  @ApiOperation({ summary: 'List schools (for registration picker)' })
-  list() {
-    return this.schools.listSchools();
-  }
-
-  @Post()
-  @ApiBearerAuth()
-  @Roles(Role.ADMIN, Role.PRINCIPAL)
-  @ApiOperation({ summary: 'Create a school (admin)' })
-  create(@Body() dto: CreateSchoolDto) {
-    return this.schools.createSchool(dto);
-  }
+  @ApiOperation({ summary: 'Get this school' })
+  current() { return this.schools.currentSchool(); }
 
   @Public()
-  @Get(':id/classes')
-  @ApiOperation({ summary: 'List classes in a school' })
-  classes(@Param('id') id: string) {
-    return this.schools.listClasses(id);
-  }
+  @Get('classes')
+  @ApiOperation({ summary: 'List this school’s classes' })
+  classes() { return this.schools.listClasses(); }
 
-  @Post(':id/classes')
+  @Post('classes')
   @ApiBearerAuth()
   @Roles(Role.ADMIN, Role.PRINCIPAL)
-  @ApiOperation({ summary: 'Create a class (admin)' })
-  createClass(@Param('id') id: string, @Body() dto: CreateClassDto) {
-    return this.schools.createClass(id, dto);
+  @ApiOperation({ summary: 'Create a class in this school' })
+  createClass(@CurrentUser() user: AuthUser, @Body() dto: CreateClassDto) {
+    return this.schools.createClass(user, dto);
   }
 }

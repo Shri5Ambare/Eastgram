@@ -1,26 +1,5 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsInt, IsOptional, IsString, MaxLength } from 'class-validator';
-
-export class CreateSchoolDto {
-  @ApiProperty()
-  @IsString()
-  @MaxLength(140)
-  name: string;
-
-  @ApiProperty({ example: 'greenwood-high' })
-  @IsString()
-  slug: string;
-
-  @ApiPropertyOptional()
-  @IsOptional()
-  @IsString()
-  address?: string;
-
-  @ApiPropertyOptional()
-  @IsOptional()
-  @IsString()
-  logoUrl?: string;
-}
+import { IsInt, IsOptional, IsString } from 'class-validator';
 
 export class CreateClassDto {
   @ApiProperty({ example: 'Grade 10 - A' })

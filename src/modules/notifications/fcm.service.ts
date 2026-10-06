@@ -1,6 +1,7 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import * as admin from 'firebase-admin';
+import { App, cert, getApp, getApps, initializeApp } from 'firebase-admin/app';
+import { getMessaging, SendResponse } from 'firebase-admin/messaging';
 import { existsSync } from 'fs';
 import { PrismaService } from '@/prisma/prisma.service';
 
@@ -11,7 +12,7 @@ import { PrismaService } from '@/prisma/prisma.service';
 @Injectable()
 export class FcmService implements OnModuleInit {
   private readonly logger = new Logger(FcmService.name);
-  private app?: admin.app.App;
+  private app?: App;
   private enabled = false;
 
   constructor(
@@ -32,10 +33,10 @@ export class FcmService implements OnModuleInit {
       return;
     }
 
-    this.app = admin.apps.length
-      ? admin.app()
-      : admin.initializeApp({
-          credential: admin.credential.cert(require(require('path').resolve(path))),
+    this.app = getApps().length
+      ? getApp()
+      : initializeApp({
+          credential: cert(require(require('path').resolve(path))),
         });
     this.enabled = true;
     this.logger.log('FCM initialised');
@@ -55,7 +56,7 @@ export class FcmService implements OnModuleInit {
 
     const tokens = devices.map((d) => d.fcmToken);
     try {
-      const res = await this.app.messaging().sendEachForMulticast({
+      const res = await getMessaging(this.app).sendEachForMulticast({
         tokens,
         notification: { title: payload.title, body: payload.body },
         data: payload.data ?? {},
@@ -67,7 +68,7 @@ export class FcmService implements OnModuleInit {
   }
 
   private async pruneInvalidTokens(
-    responses: admin.messaging.SendResponse[],
+    responses: SendResponse[],
     tokens: string[],
   ) {
     const dead = responses

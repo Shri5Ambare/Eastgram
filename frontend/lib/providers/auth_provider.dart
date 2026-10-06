@@ -9,7 +9,7 @@ class AuthProvider extends ChangeNotifier {
   final AuthService authService;
   final ChatService chatService;
   final ApiClient apiClient;
-  final NotificationService notificationService = NotificationService();
+  final NotificationService notificationService;
 
   User? _currentUser;
   bool _isLoading = false;
@@ -26,9 +26,17 @@ class AuthProvider extends ChangeNotifier {
     required this.authService,
     required this.chatService,
     required this.apiClient,
-  }) {
+    NotificationService? notificationService,
+  }) : notificationService = notificationService ?? NotificationService() {
     // Bind API client unauthorized callback to logout
-    apiClient.onUnauthorized = logout;
+    apiClient.onUnauthorized = () {
+      chatService.disconnectSocket();
+      _currentUser = null;
+      notifyListeners();
+    };
+    apiClient.onTokenRefreshed = (token) {
+      if (_currentUser != null) chatService.connectSocket(token);
+    };
     checkAuthStatus();
   }
 
@@ -41,18 +49,14 @@ class AuthProvider extends ChangeNotifier {
       if (token != null) {
         final response = await apiClient.dio.get('/users/me');
         _currentUser = User.fromJson(response.data['data'] as Map<String, dynamic>);
-        chatService.connectSocket(token);
+        final currentToken = await apiClient.tokenStorage.getAccessToken();
+        if (currentToken != null) chatService.connectSocket(currentToken);
 
-        // Initialize Firebase and register FCM token
-        await notificationService.initialize();
-        final fcmToken = await notificationService.getDeviceToken();
-        if (fcmToken != null) {
-          await notificationService.registerDevice(token: fcmToken, apiClient: apiClient);
-        }
+        await _initializeNotifications();
       }
     } catch (_) {
-      // Clear tokens on fail
-      await apiClient.tokenStorage.clearTokens();
+      // Keep persisted credentials on network/push failures for a later retry.
+      chatService.disconnectSocket();
       _currentUser = null;
     } finally {
       _isLoading = false;
@@ -73,12 +77,7 @@ class AuthProvider extends ChangeNotifier {
       if (token != null) {
         chatService.connectSocket(token);
 
-        // Initialize Firebase and register FCM token
-        await notificationService.initialize();
-        final fcmToken = await notificationService.getDeviceToken();
-        if (fcmToken != null) {
-          await notificationService.registerDevice(token: fcmToken, apiClient: apiClient);
-        }
+        await _initializeNotifications();
       }
       
       _isLoading = false;
@@ -97,7 +96,6 @@ class AuthProvider extends ChangeNotifier {
     required String username,
     required String password,
     required String fullName,
-    required String schoolId,
     String? classId,
   }) async {
     _isLoading = true;
@@ -110,7 +108,6 @@ class AuthProvider extends ChangeNotifier {
         username: username,
         password: password,
         fullName: fullName,
-        schoolId: schoolId,
         classId: classId,
       );
       _isLoading = false;
@@ -124,23 +121,36 @@ class AuthProvider extends ChangeNotifier {
     }
   }
 
-  Future<void> logout() async {
-    _isLoading = true;
-    notifyListeners();
-
+  Future<void> _initializeNotifications() async {
     try {
-      // Unregister FCM device token on logout
+      await notificationService.initialize();
       final fcmToken = await notificationService.getDeviceToken();
       if (fcmToken != null) {
-        await notificationService.unregisterDevice(token: fcmToken, apiClient: apiClient);
+        await notificationService.registerDevice(token: fcmToken, apiClient: apiClient);
       }
-
-      chatService.disconnectSocket();
-      await authService.logout();
     } catch (_) {
-      // Silent error
+      // Optional push support never invalidates a successful login.
+    }
+  }
+
+  Future<void> logout() async {
+    _isLoading = true;
+    _currentUser = null;
+    chatService.disconnectSocket();
+    notifyListeners();
+    // Start ending the session before optional push cleanup can fail.
+    final endSession = apiClient.endSession(clearTokens: false);
+    try {
+      try {
+        final fcmToken = await notificationService.getDeviceToken();
+        if (fcmToken != null) {
+          await notificationService.unregisterDevice(token: fcmToken, apiClient: apiClient);
+        }
+      } catch (_) {}
+      await endSession;
+      await authService.logout();
     } finally {
-      _currentUser = null;
+      await apiClient.endSession();
       _isLoading = false;
       notifyListeners();
     }

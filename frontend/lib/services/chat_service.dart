@@ -18,13 +18,14 @@ class ChatService {
   ChatService({required this.apiClient});
 
   void connectSocket(String token) {
-    _socket?.disconnect();
+    _socket?.dispose();
 
     _socket = io.io(
       AppConfig.socketUrl,
       io.OptionBuilder()
           .setTransports(['websocket'])
           .setAuth({'token': token})
+          .enableForceNew()
           .enableAutoConnect()
           .build(),
     );
@@ -35,6 +36,10 @@ class ChatService {
 
     _socket!.onDisconnect((_) {
       // socket disconnected
+    });
+
+    _socket!.on('session:expired', (_) async {
+      try { await apiClient.refreshAccessToken(); } catch (_) {}
     });
 
     _socket!.on('message:new', (data) {
@@ -56,7 +61,7 @@ class ChatService {
   }
 
   void disconnectSocket() {
-    _socket?.disconnect();
+    _socket?.dispose();
     _socket = null;
   }
 
@@ -136,6 +141,6 @@ class ChatService {
   void dispose() {
     _messageController.close();
     _readController.close();
-    _socket?.disconnect();
+    _socket?.dispose();
   }
 }

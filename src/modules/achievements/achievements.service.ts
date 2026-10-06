@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { NotificationType } from '@prisma/client';
 import { AuthUser } from '@common/decorators/current-user.decorator';
 import { paginate, PaginationDto } from '@common/dto/pagination.dto';
@@ -16,8 +16,13 @@ export class AchievementsService {
     private readonly notifications: NotificationsService,
   ) {}
 
+  private requireStaff(user: AuthUser) {
+    if (!['TEACHER', 'ADMIN', 'PRINCIPAL'].includes(user.role)) throw new ForbiddenException('Only school staff can manage achievements');
+  }
+
   /** Staff define achievement types in a catalog. */
-  createCatalog(dto: CreateAchievementDto) {
+  createCatalog(user: AuthUser, dto: CreateAchievementDto) {
+    this.requireStaff(user);
     return this.prisma.achievement.create({ data: dto });
   }
 
@@ -39,6 +44,9 @@ export class AchievementsService {
 
   /** Staff award an achievement to a student. Notifies the recipient. */
   async award(granter: AuthUser, dto: AwardAchievementDto) {
+    this.requireStaff(granter);
+    const recipient = await this.prisma.user.findFirst({ where: { id: dto.recipientId, schoolId: granter.schoolId }, select: { id: true } });
+    if (!recipient) throw new NotFoundException('User not found');
     const achievement = await this.prisma.achievement.findUnique({
       where: { id: dto.achievementId },
     });
@@ -73,9 +81,9 @@ export class AchievementsService {
     return award;
   }
 
-  async userAchievements(username: string, dto: PaginationDto) {
-    const user = await this.prisma.user.findUnique({
-      where: { username },
+  async userAchievements(viewer: AuthUser, username: string, dto: PaginationDto) {
+    const user = await this.prisma.user.findFirst({
+      where: { username, schoolId: viewer.schoolId },
       select: { id: true },
     });
     if (!user) throw new NotFoundException('User not found');

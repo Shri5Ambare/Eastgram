@@ -9,6 +9,8 @@ export const validationSchema = Joi.object({
   API_PREFIX: Joi.string().default('api/v1'),
   CORS_ORIGINS: Joi.string().default('*'),
 
+  APP_SCHOOL_ID: Joi.string().optional(),
+
   DATABASE_URL: Joi.string().required(),
 
   REDIS_HOST: Joi.string().default('localhost'),
@@ -18,9 +20,9 @@ export const validationSchema = Joi.object({
   REDIS_ADAPTER_ENABLED: Joi.boolean().truthy('true').falsy('false').default(true),
 
   JWT_ACCESS_SECRET: Joi.string().min(16).required(),
-  JWT_ACCESS_TTL: Joi.string().default('15m'),
+  JWT_ACCESS_TTL: Joi.string().pattern(/^\d+(ms|s|m|h|d|w|y)$/).default('15m'),
   JWT_REFRESH_SECRET: Joi.string().min(16).required(),
-  JWT_REFRESH_TTL: Joi.string().default('30d'),
+  JWT_REFRESH_TTL: Joi.string().pattern(/^\d+(ms|s|m|h|d|w|y)$/).default('30d'),
 
   R2_ACCOUNT_ID: Joi.string().allow('').optional(),
   R2_ACCESS_KEY_ID: Joi.string().allow('').optional(),

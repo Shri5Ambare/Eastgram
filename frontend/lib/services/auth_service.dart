@@ -18,7 +18,7 @@ class AuthService {
       final accessToken = responseData['accessToken'] as String;
       final refreshToken = responseData['refreshToken'] as String;
 
-      await apiClient.tokenStorage.saveTokens(
+      await apiClient.saveSession(
         accessToken: accessToken,
         refreshToken: refreshToken,
       );
@@ -35,7 +35,6 @@ class AuthService {
     required String username,
     required String password,
     required String fullName,
-    required String schoolId,
     String? classId,
   }) async {
     try {
@@ -44,7 +43,6 @@ class AuthService {
         'username': username,
         'password': password,
         'fullName': fullName,
-        'schoolId': schoolId,
         if (classId != null) 'classId': classId,
       });
 
@@ -57,7 +55,7 @@ class AuthService {
 
   Future<void> logout() async {
     try {
-      final refreshToken = await apiClient.tokenStorage.getRefreshToken();
+      final refreshToken = await apiClient.endSession(clearTokens: false);
       if (refreshToken != null) {
         await apiClient.dio.post('/auth/logout', data: {
           'refreshToken': refreshToken,
@@ -66,7 +64,7 @@ class AuthService {
     } catch (_) {
       // Ignore network errors during logout
     } finally {
-      await apiClient.tokenStorage.clearTokens();
+      await apiClient.endSession();
     }
   }
 }

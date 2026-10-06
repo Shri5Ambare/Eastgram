@@ -22,8 +22,8 @@ export class AchievementsController {
   @Post('catalog')
   @Roles(Role.TEACHER, Role.ADMIN, Role.PRINCIPAL)
   @ApiOperation({ summary: 'Define a new achievement type (staff)' })
-  createCatalog(@Body() dto: CreateAchievementDto) {
-    return this.achievements.createCatalog(dto);
+  createCatalog(@CurrentUser() user: AuthUser, @Body() dto: CreateAchievementDto) {
+    return this.achievements.createCatalog(user, dto);
   }
 
   @Get('catalog')
@@ -42,9 +42,10 @@ export class AchievementsController {
   @Get('users/:username')
   @ApiOperation({ summary: 'List a user achievements' })
   userAchievements(
+    @CurrentUser() user: AuthUser,
     @Param('username') username: string,
     @Query() dto: PaginationDto,
   ) {
-    return this.achievements.userAchievements(username, dto);
+    return this.achievements.userAchievements(user, username, dto);
   }
 }

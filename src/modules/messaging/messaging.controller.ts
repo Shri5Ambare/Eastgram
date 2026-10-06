@@ -29,24 +29,24 @@ export class MessagingController {
 
   @Get()
   @ApiOperation({ summary: 'List my conversations' })
-  list(@CurrentUser('id') userId: string, @Query() dto: PaginationDto) {
-    return this.messaging.listConversations(userId, dto);
+  list(@CurrentUser() user: AuthUser, @Query() dto: PaginationDto) {
+    return this.messaging.listConversations(user, dto);
   }
 
   @Get(':id')
   @ApiOperation({ summary: 'Get a conversation' })
-  get(@CurrentUser('id') userId: string, @Param('id') id: string) {
-    return this.messaging.getConversation(userId, id);
+  get(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+    return this.messaging.getConversation(user, id);
   }
 
   @Get(':id/messages')
   @ApiOperation({ summary: 'List messages in a conversation' })
   messages(
-    @CurrentUser('id') userId: string,
+    @CurrentUser() user: AuthUser,
     @Param('id') id: string,
     @Query() dto: PaginationDto,
   ) {
-    return this.messaging.listMessages(userId, id, dto);
+    return this.messaging.listMessages(user, id, dto);
   }
 
   @Post(':id/messages')
@@ -61,7 +61,7 @@ export class MessagingController {
 
   @Post(':id/read')
   @ApiOperation({ summary: 'Mark conversation as read' })
-  read(@CurrentUser('id') userId: string, @Param('id') id: string) {
-    return this.messaging.markRead(userId, id);
+  read(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+    return this.messaging.markRead(user, id);
   }
 }

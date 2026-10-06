@@ -1,5 +1,7 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { NotificationType, ReactionType } from '@prisma/client';
+import type { AuthUser } from '@common/decorators/current-user.decorator';
+import { PostAccessService } from './post-access.service';
 import { PrismaService } from '@/prisma/prisma.service';
 import { NotificationsService } from '../notifications/notifications.service';
 
@@ -8,15 +10,13 @@ export class ReactionsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly notifications: NotificationsService,
+    private readonly access: PostAccessService,
   ) {}
 
   /** Toggle a reaction on a post. Re-reacting with the same type removes it. */
-  async togglePost(userId: string, postId: string, type: ReactionType) {
-    const post = await this.prisma.post.findUnique({
-      where: { id: postId },
-      select: { id: true, authorId: true },
-    });
-    if (!post) throw new NotFoundException('Post not found');
+  async togglePost(user: AuthUser, postId: string, type: ReactionType) {
+    const userId = user.id;
+    const post = await this.access.requireReadable(user, postId);
 
     const existing = await this.prisma.reaction.findUnique({
       where: { userId_postId: { userId, postId } },
@@ -66,12 +66,14 @@ export class ReactionsService {
     return { reacted: true, type, likeCount: updatedPost.likeCount };
   }
 
-  async toggleComment(userId: string, commentId: string, type: ReactionType) {
+  async toggleComment(user: AuthUser, commentId: string, type: ReactionType) {
+    const userId = user.id;
     const comment = await this.prisma.comment.findUnique({
       where: { id: commentId },
       select: { id: true, authorId: true, postId: true },
     });
     if (!comment) throw new NotFoundException('Comment not found');
+    await this.access.requireReadable(user, comment.postId);
 
     const existing = await this.prisma.reaction.findUnique({
       where: { userId_commentId: { userId, commentId } },

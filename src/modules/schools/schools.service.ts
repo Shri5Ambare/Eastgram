@@ -1,29 +1,23 @@
-import { Injectable } from '@nestjs/common';
+import { ForbiddenException, Injectable } from '@nestjs/common';
+import { AuthUser } from '@common/decorators/current-user.decorator';
 import { PrismaService } from '@/prisma/prisma.service';
-import { CreateClassDto, CreateSchoolDto } from './dto/school.dto';
+import { SchoolContextService } from '@/prisma/school-context.service';
+import { CreateClassDto } from './dto/school.dto';
 
 @Injectable()
 export class SchoolsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(private readonly prisma: PrismaService, private readonly school: SchoolContextService) {}
 
-  createSchool(dto: CreateSchoolDto) {
-    return this.prisma.school.create({ data: dto });
+  currentSchool() { return this.school.current; }
+
+  createClass(user: AuthUser, dto: CreateClassDto) {
+    if (!['ADMIN', 'PRINCIPAL'].includes(user.role) || user.schoolId !== this.school.id) {
+      throw new ForbiddenException('Only this school’s administrators can create classes');
+    }
+    return this.prisma.schoolClass.create({ data: { ...dto, schoolId: this.school.id } });
   }
 
-  listSchools() {
-    return this.prisma.school.findMany({ orderBy: { name: 'asc' } });
-  }
-
-  createClass(schoolId: string, dto: CreateClassDto) {
-    return this.prisma.schoolClass.create({
-      data: { schoolId, ...dto },
-    });
-  }
-
-  listClasses(schoolId: string) {
-    return this.prisma.schoolClass.findMany({
-      where: { schoolId },
-      orderBy: { name: 'asc' },
-    });
+  listClasses() {
+    return this.prisma.schoolClass.findMany({ where: { schoolId: this.school.id }, orderBy: { name: 'asc' } });
   }
 }

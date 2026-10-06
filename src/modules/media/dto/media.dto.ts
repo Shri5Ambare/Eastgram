@@ -49,21 +49,26 @@ export class ConfirmUploadDto {
   @ApiPropertyOptional()
   @IsOptional()
   @IsInt()
+  @Min(1)
+  @Max(524_288_000)
   sizeBytes?: number;
 
   @ApiPropertyOptional()
   @IsOptional()
   @IsInt()
+  @Min(1)
   width?: number;
 
   @ApiPropertyOptional()
   @IsOptional()
   @IsInt()
+  @Min(1)
   height?: number;
 
   @ApiPropertyOptional()
   @IsOptional()
   @IsInt()
+  @Min(0)
   durationMs?: number;
 
   @ApiPropertyOptional()

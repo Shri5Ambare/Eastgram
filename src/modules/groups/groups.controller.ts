@@ -36,8 +36,8 @@ export class GroupsController {
 
   @Get(':slug')
   @ApiOperation({ summary: 'Get a group by slug' })
-  findOne(@Param('slug') slug: string) {
-    return this.groups.findOne(slug);
+  findOne(@CurrentUser() user: AuthUser, @Param('slug') slug: string) {
+    return this.groups.findOne(user, slug);
   }
 
   @Patch(':id')
@@ -74,7 +74,7 @@ export class GroupsController {
 
   @Get(':id/members')
   @ApiOperation({ summary: 'List group members' })
-  members(@Param('id') id: string, @Query() dto: PaginationDto) {
-    return this.groups.members(id, dto);
+  members(@CurrentUser() user: AuthUser, @Param('id') id: string, @Query() dto: PaginationDto) {
+    return this.groups.members(user, id, dto);
   }
 }
