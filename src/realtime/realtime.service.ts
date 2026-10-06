@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Server } from 'socket.io';
+import { SchoolContextService } from '@/prisma/school-context.service';
 import { PrismaService } from '@/prisma/prisma.service';
 
 /** Delivery checks current account and club state; stale socket rooms grant no access. */
@@ -7,7 +8,7 @@ import { PrismaService } from '@/prisma/prisma.service';
 export class RealtimeService {
   private server?: Server;
   private readonly logger = new Logger(RealtimeService.name);
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(private readonly prisma: PrismaService, private readonly school: SchoolContextService) {}
 
   bind(server: Server) { this.server = server; }
 
@@ -19,7 +20,7 @@ export class RealtimeService {
     if (!this.server || !userIds.length) return;
     try {
       const users = await this.prisma.user.findMany({
-        where: { id: { in: userIds }, status: 'ACTIVE' }, select: { id: true },
+        where: { id: { in: userIds }, status: 'ACTIVE', schoolId: this.school.id }, select: { id: true },
       });
       if (users.length) this.server.to(users.map(u => `user:${u.id}`)).emit(event, payload);
     } catch {
@@ -39,6 +40,7 @@ export class RealtimeService {
       });
       if (!conversation?.members.length) return;
       const schoolId = conversation.members[0].user.schoolId;
+      if (schoolId !== this.school.id) return;
       if (conversation.members.some(m => m.user.schoolId !== schoolId)) return;
       const group = conversation.group;
       if (group && (group.isArchived || group.schoolId !== schoolId)) return;

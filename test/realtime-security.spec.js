@@ -25,7 +25,7 @@ describe('socket sessions', () => {
       const gateway = new RealtimeGateway(
         { emitToUser: jest.fn().mockResolvedValue(undefined) }, jwt, { get: () => secret },
         { setOnline: jest.fn().mockResolvedValue(undefined), setOffline: jest.fn().mockResolvedValue(1) },
-        { user: { findFirst: jest.fn().mockResolvedValue({ id: 'user' }) } },
+        { user: { findFirst: jest.fn().mockResolvedValue({ id: 'user' }) } }, { id: 'school' },
       );
       await gateway.handleConnection(client);
       expect(client.connected).toBe(true);
@@ -45,7 +45,7 @@ describe('socket sessions', () => {
     const setOnline = jest.fn();
     const gateway = new RealtimeGateway(
       {}, jwt, { get: () => secret }, { setOnline },
-      { user: { findFirst: jest.fn().mockResolvedValueOnce({ id: 'user' }).mockResolvedValueOnce(null) } },
+      { user: { findFirst: jest.fn().mockResolvedValueOnce({ id: 'user' }).mockResolvedValueOnce(null) } }, { id: 'school' },
     );
     await gateway.handleConnection(client);
     expect(client.disconnect).toHaveBeenCalledWith(true);

@@ -5,11 +5,12 @@ import {
   UnauthorizedException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { JwtService } from '@nestjs/jwt';
+import { JwtService, JwtSignOptions } from '@nestjs/jwt';
 import { Prisma, Role, User, UserStatus } from '@prisma/client';
 import * as argon2 from 'argon2';
 import { createHash, randomBytes } from 'crypto';
 import { PrismaService } from '@/prisma/prisma.service';
+import { SchoolContextService } from '@/prisma/school-context.service';
 import { LoginDto, RefreshDto, RegisterDto } from './dto/auth.dto';
 
 interface TokenContext {
@@ -23,11 +24,12 @@ export class AuthService {
     private readonly prisma: PrismaService,
     private readonly jwt: JwtService,
     private readonly config: ConfigService,
+    private readonly school: SchoolContextService,
   ) {}
 
   async register(dto: RegisterDto) {
     if (dto.classId) {
-      const schoolClass = await this.prisma.schoolClass.findFirst({ where: { id: dto.classId, schoolId: dto.schoolId }, select: { id: true } });
+      const schoolClass = await this.prisma.schoolClass.findFirst({ where: { id: dto.classId, schoolId: this.school.id }, select: { id: true } });
       if (!schoolClass) throw new BadRequestException('Class does not belong to this school');
     }
     const existing = await this.prisma.user.findFirst({
@@ -46,7 +48,7 @@ export class AuthService {
         username: dto.username,
         fullName: dto.fullName,
         passwordHash,
-        schoolId: dto.schoolId,
+        schoolId: this.school.id,
         classId: dto.classId,
         role: Role.STUDENT,
         // New students start PENDING; an admin/teacher activates them.
@@ -67,7 +69,7 @@ export class AuthService {
       },
     });
 
-    if (!user || !(await argon2.verify(user.passwordHash, dto.password))) {
+    if (!user || user.schoolId !== this.school.id || !(await argon2.verify(user.passwordHash, dto.password))) {
       throw new UnauthorizedException('Invalid credentials');
     }
     if (user.status === UserStatus.PENDING) {
@@ -97,7 +99,7 @@ export class AuthService {
     try {
       return await this.prisma.$transaction(async (tx) => {
         const user = await tx.user.findUnique({ where: { id: payload.sub } });
-        if (!user || user.status !== UserStatus.ACTIVE) {
+        if (!user || user.schoolId !== this.school.id || user.status !== UserStatus.ACTIVE) {
           throw new UnauthorizedException('Account is not active');
         }
         // Compare-and-set: exactly one request can consume this token. Issuing
@@ -133,7 +135,7 @@ export class AuthService {
       { sub: user.id, email: user.email, role: user.role },
       {
         secret: this.config.get<string>('jwt.accessSecret'),
-        expiresIn: this.config.get<string>('jwt.accessTtl'),
+        expiresIn: this.config.get<JwtSignOptions['expiresIn']>('jwt.accessTtl'),
       },
     );
 
@@ -141,7 +143,7 @@ export class AuthService {
       { sub: user.id, jti: randomBytes(16).toString('hex') },
       {
         secret: this.config.get<string>('jwt.refreshSecret'),
-        expiresIn: this.config.get<string>('jwt.refreshTtl'),
+        expiresIn: this.config.get<JwtSignOptions['expiresIn']>('jwt.refreshTtl'),
       },
     );
 

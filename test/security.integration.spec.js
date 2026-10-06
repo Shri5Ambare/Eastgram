@@ -62,7 +62,7 @@ integration('security regression with PostgreSQL', () => {
     comments = new CommentsService(db, notify, access);
     reactions = new ReactionsService(db, notify, access);
     users = new UsersService(db, realtime);
-    auth = new AuthService(db, jwt, config);
+    auth = new AuthService(db, jwt, config, { id: schools[0].id });
     messaging = new MessagingService(db, realtime, notify);
     media = new MediaService(db, { get: key => ({
       'r2.endpoint': 'https://account.r2.cloudflarestorage.com', 'r2.bucket': 'test-private-bucket',
@@ -267,7 +267,7 @@ integration('security regression with PostgreSQL', () => {
   });
 
   test('realtime delivery ignores stale rooms and rechecks active club members', async () => {
-    const service = new RealtimeService(db);
+    const service = new RealtimeService(db, { id: schools[0].id });
     const emit = jest.fn();
     const server = { to: jest.fn(() => ({ emit })) };
     service.bind(server);

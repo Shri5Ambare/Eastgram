@@ -35,7 +35,6 @@ class AuthService {
     required String username,
     required String password,
     required String fullName,
-    required String schoolId,
     String? classId,
   }) async {
     try {
@@ -44,7 +43,6 @@ class AuthService {
         'username': username,
         'password': password,
         'fullName': fullName,
-        'schoolId': schoolId,
         if (classId != null) 'classId': classId,
       });
 

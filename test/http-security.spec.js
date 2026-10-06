@@ -21,10 +21,18 @@ integration('compiled HTTP application', () => {
 
   beforeAll(async () => {
     if (!process.env.TEST_DATABASE_URL) throw new Error('HTTP checks require a disposable TEST_DATABASE_URL');
+    db = new PrismaClient({ datasources: { db: { url: process.env.TEST_DATABASE_URL } } });
+    const suffix = randomUUID();
+    schools = await Promise.all(['a', 'b'].map(name => db.school.create({ data: { name, slug: 'http-' + name + '-' + suffix } })));
+    const passwordHash = await argon2.hash('integration-password');
+    users = await Promise.all(schools.map((school, i) => db.user.create({ data: {
+      schoolId: school.id, username: 'http-' + i + '-' + suffix, email: i + '-' + suffix + '@example.test',
+      fullName: 'HTTP fixture', passwordHash, role: 'ADMIN', status: 'ACTIVE',
+    } })));
     child = spawn(process.execPath, ['dist/main.js'], {
       env: { ...process.env, NODE_ENV: 'test', PORT: String(port), DATABASE_URL: process.env.TEST_DATABASE_URL,
         JWT_ACCESS_SECRET: 'http-test-access-secret-only', JWT_REFRESH_SECRET: 'http-test-refresh-secret-only',
-        REDIS_ADAPTER_ENABLED: 'false', FCM_ENABLED: 'false' },
+        APP_SCHOOL_ID: schools[0].id, REDIS_ADAPTER_ENABLED: 'false', FCM_ENABLED: 'false' },
       stdio: ['ignore', 'pipe', 'pipe'],
     });
     const capture = chunk => { output = (output + chunk.toString()).slice(-20000); };
@@ -39,20 +47,15 @@ integration('compiled HTTP application', () => {
       await new Promise(resolve => setTimeout(resolve, 100));
     }
     if (!ready) throw new Error('Compiled app readiness failed: ' + output);
-    db = new PrismaClient({ datasources: { db: { url: process.env.TEST_DATABASE_URL } } });
-    const suffix = randomUUID();
-    schools = await Promise.all(['a', 'b'].map(name => db.school.create({ data: { name, slug: 'http-' + name + '-' + suffix } })));
-    const passwordHash = await argon2.hash('integration-password');
-    users = await Promise.all(schools.map((school, i) => db.user.create({ data: {
-      schoolId: school.id, username: 'http-' + i + '-' + suffix, email: i + '-' + suffix + '@example.test',
-      fullName: 'HTTP fixture', passwordHash, role: 'ADMIN', status: 'ACTIVE',
-    } })));
     tokens = [];
-    for (const user of users) {
+    for (const user of [users[0]]) {
       const login = await request('/auth/login', null, 'POST', { identifier: user.email, password: 'integration-password' });
       expect(login.status).toBe(201);
       tokens.push(login.body.data.accessToken);
     }
+    const { JwtService } = require('@nestjs/jwt');
+    tokens.push(new JwtService().sign({ sub: users[1].id, email: users[1].email, role: users[1].role },
+      { secret: 'http-test-access-secret-only', expiresIn: '5m' }));
     post = await db.post.create({ data: { authorId: users[0].id, visibility: 'PRIVATE', caption: 'private' } });
   }, 30000);
 
@@ -70,12 +73,14 @@ integration('compiled HTTP application', () => {
     expect(docs.status).toBe(200);
     const schema = await docs.json();
     expect(schema.paths['/api/v1/users/me']).toBeDefined();
+    expect(schema.paths['/api/v1/schools']).toBeUndefined();
+    expect(schema.paths['/api/v1/school'].post).toBeUndefined();
   });
 
   test('guards and route order preserve /users/me and reject anonymous/foreign reads', async () => {
     expect((await request('/users/me')).status).toBe(401);
     expect((await request('/users/me', tokens[0])).body.data.id).toBe(users[0].id);
-    expect((await request('/posts/' + post.id, tokens[1])).status).toBe(404);
+    expect((await request('/posts/' + post.id, tokens[1])).status).toBe(401);
     expect((await request('/posts/' + post.id, tokens[0])).body.data.id).toBe(post.id);
   });
 
@@ -88,12 +93,29 @@ integration('compiled HTTP application', () => {
     expect((await request('/auth/login', null, 'POST', { identifier: users[0].email, password: 'integration-password', role: 'ADMIN' })).status).toBe(400);
   });
 
-  test('school administrators cannot create classes in another school', async () => {
+  test('multi-school administration is removed and classes belong to this school', async () => {
+    expect((await request('/schools', tokens[0], 'POST', { name: 'new', slug: 'new' })).status).toBe(404);
+    expect((await request('/schools')).status).toBe(404);
+    expect((await request('/school')).body.data.id).toBe(schools[0].id);
+    expect((await request('/school/classes', tokens[0], 'POST', { name: 'bad', schoolId: schools[1].id })).status).toBe(400);
     const foreign = await request('/schools/' + schools[1].id + '/classes', tokens[0], 'POST', { name: 'blocked' });
     expect(foreign.status).toBe(404);
-    const own = await request('/schools/' + schools[0].id + '/classes', tokens[0], 'POST', { name: 'allowed' });
+    const own = await request('/school/classes', tokens[0], 'POST', { name: 'allowed' });
     expect(own.status).toBe(201);
     expect(own.body.data.schoolId).toBe(schools[0].id);
+  });
+
+  test('registration assigns this school and legacy foreign accounts cannot log in', async () => {
+    const suffix = randomUUID();
+    const registration = { email: suffix + '@example.test', username: 'u' + suffix.replaceAll('-', '').slice(0, 20),
+      fullName: 'New student', password: 'integration-password' };
+    expect((await request('/auth/register', null, 'POST', { ...registration, schoolId: schools[1].id })).status).toBe(400);
+    const created = await request('/auth/register', null, 'POST', registration);
+    expect(created.status).toBe(201);
+    expect(created.body.data.schoolId).toBe(schools[0].id);
+    expect(created.body.data.status).toBe('PENDING');
+    expect((await request('/auth/login', null, 'POST', { identifier: users[1].email, password: 'integration-password' })).status).toBe(401);
+    expect((await request('/school/classes', tokens[1], 'POST', { name: 'blocked' })).status).toBe(401);
   });
 
   test('refresh/reuse behavior and inactive-user rejection survive the real guards', async () => {

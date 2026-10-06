@@ -96,7 +96,6 @@ class AuthProvider extends ChangeNotifier {
     required String username,
     required String password,
     required String fullName,
-    required String schoolId,
     String? classId,
   }) async {
     _isLoading = true;
@@ -109,7 +108,6 @@ class AuthProvider extends ChangeNotifier {
         username: username,
         password: password,
         fullName: fullName,
-        schoolId: schoolId,
         classId: classId,
       );
       _isLoading = false;

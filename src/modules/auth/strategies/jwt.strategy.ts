@@ -4,6 +4,7 @@ import { PassportStrategy } from '@nestjs/passport';
 import { ExtractJwt, Strategy } from 'passport-jwt';
 import { UserStatus } from '@prisma/client';
 import { PrismaService } from '@/prisma/prisma.service';
+import { SchoolContextService } from '@/prisma/school-context.service';
 import { AuthUser } from '@common/decorators/current-user.decorator';
 
 export interface JwtPayload {
@@ -17,11 +18,12 @@ export class JwtStrategy extends PassportStrategy(Strategy, 'jwt') {
   constructor(
     config: ConfigService,
     private readonly prisma: PrismaService,
+    private readonly school: SchoolContextService,
   ) {
     super({
       jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
       ignoreExpiration: false,
-      secretOrKey: config.get<string>('jwt.accessSecret'),
+      secretOrKey: config.getOrThrow<string>('jwt.accessSecret'),
     });
   }
 
@@ -40,7 +42,7 @@ export class JwtStrategy extends PassportStrategy(Strategy, 'jwt') {
       },
     });
 
-    if (!user || user.status !== UserStatus.ACTIVE) {
+    if (!user || user.schoolId !== this.school.id || user.status !== UserStatus.ACTIVE) {
       throw new UnauthorizedException('Account is not active');
     }
 

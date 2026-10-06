@@ -4,6 +4,7 @@ import { JwtService } from '@nestjs/jwt';
 import { OnGatewayConnection, OnGatewayDisconnect, OnGatewayInit, WebSocketGateway, WebSocketServer } from '@nestjs/websockets';
 import { Server, Socket } from 'socket.io';
 import { UserStatus } from '@prisma/client';
+import { SchoolContextService } from '@/prisma/school-context.service';
 import { PrismaService } from '@/prisma/prisma.service';
 import { RedisService } from '@/redis/redis.service';
 import { RealtimeService } from './realtime.service';
@@ -25,6 +26,7 @@ export class RealtimeGateway implements OnGatewayInit, OnGatewayConnection, OnGa
     private readonly config: ConfigService,
     private readonly redis: RedisService,
     private readonly prisma: PrismaService,
+    private readonly school: SchoolContextService,
   ) {}
 
   afterInit(server: Server) {
@@ -37,7 +39,7 @@ export class RealtimeGateway implements OnGatewayInit, OnGatewayConnection, OnGa
       const auth = await authenticateSocket(client, this.jwt, this.config.get<string>('jwt.accessSecret')!);
       if (!auth) { client.disconnect(true); return; }
       const active = async () => Boolean(await this.prisma.user.findFirst({
-        where: { id: auth.userId, status: UserStatus.ACTIVE }, select: { id: true },
+        where: { id: auth.userId, status: UserStatus.ACTIVE, schoolId: this.school.id }, select: { id: true },
       }));
       if (!await active() || !client.connected) { client.disconnect(true); return; }
       client.userId = auth.userId;

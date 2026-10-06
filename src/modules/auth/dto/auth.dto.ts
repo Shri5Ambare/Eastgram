@@ -29,10 +29,6 @@ export class RegisterDto {
   @MinLength(8)
   password: string;
 
-  @ApiProperty({ description: 'School the user belongs to' })
-  @IsString()
-  schoolId: string;
-
   @ApiPropertyOptional({ description: 'Class / grade id' })
   @IsOptional()
   @IsString()

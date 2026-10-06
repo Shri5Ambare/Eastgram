@@ -1,6 +1,6 @@
 # EduGram — Backend
 
-Backend for **EduGram**, a private school-focused social media platform (Instagram-style)
+Backend for **EduGram**, a private single-school social media platform (Instagram-style)
 with controlled communication, reels, stories, polls, voting, clubs, events and achievements.
 
 Built per the PRD stack: **NestJS · PostgreSQL · Prisma · Redis · Socket.IO · Cloudflare R2 · Firebase Cloud Messaging**.
@@ -39,6 +39,14 @@ Staff (Teacher/Admin/Principal) always have full messaging rights. Group and eve
 creation are likewise restricted to Authorized Students and staff.
 
 ---
+
+## Single-school deployment
+
+This app serves one school. There is no school picker, school creation API, switching, or multi-school administration. School administrators still manage their own students, classes and permissions.
+
+Seed the school before starting. If exactly one school exists, it is selected automatically. With legacy school rows, set `APP_SCHOOL_ID` to the intended school's ID; other accounts cannot log in, refresh, use authenticated routes or connect to realtime. Existing records are preserved.
+
+Use `GET /school`, `GET /school/classes` and staff-only `POST /school/classes`. Registration accepts no school ID; the server assigns it. The old `/schools` endpoints have been removed.
 
 ## Getting started
 
@@ -89,7 +97,7 @@ src/
 └── modules/
     ├── auth/          # JWT strategy, register/login/refresh
     ├── users/         # profiles + admin role/permission management
-    ├── schools/       # schools + classes (bootstrap)
+    ├── schools/       # configured school + classes
     ├── follows/       # social graph + follow requests
     ├── media/         # Cloudflare R2 presigned uploads
     ├── posts/         # feed, reels, stories, comments, reactions
