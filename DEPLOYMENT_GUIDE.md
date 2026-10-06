@@ -33,6 +33,7 @@ This guide details how to deploy **EduGram** for free using **PandaStack** (Back
 | :--- | :--- | :--- |
 | `NODE_ENV` | `production` | Production environment |
 | `PORT` | `3000` | HTTP Port |
+| `APP_SCHOOL_ID` | `[EXISTING-SCHOOL-ID]` | The single school served by this deployment; optional only if exactly one school exists |
 | `DATABASE_URL` | `postgresql://...` | Connection string from PandaStack Postgres |
 | `REDIS_HOST` | `[REDIS_HOST]` | Host from PandaStack Redis |
 | `REDIS_PORT` | `6379` | Redis Port |
@@ -41,7 +42,9 @@ This guide details how to deploy **EduGram** for free using **PandaStack** (Back
 | `JWT_REFRESH_SECRET` | `[RANDOM-SECURE-STRING]` | 64-char hex secret |
 | `REDIS_ADAPTER_ENABLED` | `true` | Enable Socket.io multi-node adapter |
 
-6. Save and deploy! PandaStack will build the container, run database migrations (`npx prisma migrate deploy`), and assign a public URL (e.g. `https://edugram-api.pandastack.app`).
+6. Provision the school's record and set `APP_SCHOOL_ID` before starting the API. The app deliberately fails startup when the school is missing or ambiguous. Do not run the demo seed in production; it creates sample accounts with a shared password.
+
+7. Save and deploy! PandaStack will build the container, run database migrations (`npx prisma migrate deploy`), and assign a public URL (e.g. `https://edugram-api.pandastack.app`).
 
 ---
 

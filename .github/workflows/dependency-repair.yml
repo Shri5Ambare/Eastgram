@@ -52,7 +52,7 @@ jobs:
           node -e "const a=require('./audit.json'); for (const [name,v] of Object.entries(a.vulnerabilities || {})) console.log(JSON.stringify({name,severity:v.severity,fixAvailable:v.fixAvailable,via:v.via})); console.log(JSON.stringify(a.metadata));"
       - run: npx prisma generate
       - run: npx prisma db push --skip-generate
-      - name: Build single-school production application
+      - name: Build production application with single-school configuration
         run: npm run build
       - run: node --test test/post-policy.node.test.cjs
       - run: npm test -- --runInBand

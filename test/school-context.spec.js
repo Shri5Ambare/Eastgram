@@ -8,7 +8,7 @@ describe('single-school deployment', () => {
     expect(service.current).toEqual(school);
     expect(service.id).toBe('one');
   });
-  test.each([[], [school, { id: 'other' }]])('fails startup for an ambiguous or empty database: %j', async rows => {
+  test.each([[[]], [[school, { id: 'other' }]]])('fails startup for an ambiguous or empty database: %j', async rows => {
     const service = new SchoolContextService({ school: { findMany: async () => rows } }, { get: () => undefined });
     await expect(service.onModuleInit()).rejects.toThrow('Seed one school');
   });
